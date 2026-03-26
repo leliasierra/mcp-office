@@ -29,6 +29,23 @@ MCP server for Office document manipulation (Word, Excel, PowerPoint, PDF).
 - Merge cells
 - Column width management
 
+### Excel Operations
+- Create and read workbooks
+- Write cells and add rows
+- Add formulas
+- Format cells (bold, color, background)
+- Add tables and merge cells
+- Set column widths
+- List sheets
+
+### PowerPoint Operations
+- Create presentations
+- Add slides with layouts
+- Add titles and text
+- Add images
+- Add tables
+- List slides
+
 ### PDF Operations
 - Read and extract content from PDF
 - Get PDF metadata
@@ -42,6 +59,8 @@ MCP server for Office document manipulation (Word, Excel, PowerPoint, PDF).
 ### Conversions
 - Convert Word to PDF
 - Convert PDF to Word
+- Convert Excel to PDF (requires LibreOffice)
+- Convert PowerPoint to PDF (requires LibreOffice)
 
 ## Installation
 
@@ -74,6 +93,48 @@ Create a new Word document with the quarterly report. use office
 Extract all text from document.pdf. use office
 ```
 
+## OpenCode CLI Usage
+
+Run OpenCode with a direct message using `opencode run`:
+
+```bash
+# Create a Word document
+opencode run "Create a new Word document at C:/reports/test.docx with title 'Quarterly Report' and add a paragraph 'Hello World'. use office"
+
+# Read PDF content
+opencode run "Extract all text from C:/documents/report.pdf. use office"
+
+# Create Excel spreadsheet
+opencode run "Create an Excel workbook at C:/data/sales.xlsx with sheet 'Sales' and add headers ['Product', 'Qty', 'Price']. use office"
+
+# Add slides to PowerPoint
+opencode run "Create a PowerPoint at C:/presentations/demo.pptx with title 'My Presentation' and add a title+content slide. use office"
+```
+
+## GitHub Copilot CLI Configuration
+
+For GitHub Copilot CLI (`gh copilot`), add to your `~/.copilotrc` or configure via `gh copilot config`:
+
+```json
+{
+  "mcp_servers": {
+    "office": {
+      "command": "python",
+      "args": ["-c", "import asyncio;from mcp_office import main;asyncio.run(main())"],
+      "env": {
+        "PYTHONPATH": "path/to/mcp-office/src"
+      }
+    }
+  }
+}
+```
+
+Or set the environment variable:
+```bash
+export PYTHONPATH=path/to/mcp-office/src
+gh copilot run --experimental-mcp "office" "Create a Word document..."
+```
+
 ## Available Tools
 
 | Tool | Description |
@@ -92,6 +153,23 @@ Extract all text from document.pdf. use office
 | `add_bullet_list` | Add a bullet/numbered list |
 | `find_replace` | Find and replace text |
 | `format_table_cell` | Format table cells |
+| `excel_create` | Create a new Excel workbook |
+| `excel_read` | Read data from Excel |
+| `excel_write_cell` | Write to a cell |
+| `excel_add_row` | Add a row |
+| `excel_add_formula` | Add a formula |
+| `excel_format_cell` | Format a cell |
+| `excel_add_table` | Add a table |
+| `excel_set_column_width` | Set column width |
+| `excel_merge_cells` | Merge cells |
+| `excel_list_sheets` | List sheets |
+| `ppt_create` | Create a presentation |
+| `ppt_add_slide` | Add a slide |
+| `ppt_add_title` | Add title to slide |
+| `ppt_add_text` | Add text to slide |
+| `ppt_add_image` | Add image to slide |
+| `ppt_add_table` | Add table to slide |
+| `ppt_list_slides` | List slides |
 | `pdf_read` | Read and extract PDF content |
 | `pdf_get_info` | Get PDF metadata |
 | `pdf_split` | Split PDF into pages |

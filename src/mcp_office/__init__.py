@@ -11,6 +11,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 import fitz
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill
+from pptx import Presentation
+from pptx.util import Inches as PptxInches, Pt as PptxPt
 
 server = Server("mcp-office")
 
@@ -904,6 +908,322 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Output Word path",
                     },
+                },
+                "required": ["input_path", "output_path"],
+            },
+        ),
+        Tool(
+            name="excel_create",
+            description="Create a new Excel workbook",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to save workbook"},
+                    "sheet_name": {"type": "string", "description": "Sheet name"},
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="excel_read",
+            description="Read data from Excel workbook",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name or index"},
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="excel_write_cell",
+            description="Write value to a cell",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "cell": {"type": "string", "description": "Cell (e.g., A1)"},
+                    "value": {"type": "string", "description": "Value to write"},
+                },
+                "required": ["path", "sheet", "cell", "value"],
+            },
+        ),
+        Tool(
+            name="excel_add_row",
+            description="Add a row of data to a sheet",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Row data",
+                    },
+                },
+                "required": ["path", "sheet", "data"],
+            },
+        ),
+        Tool(
+            name="excel_add_formula",
+            description="Add a formula to a cell",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "cell": {"type": "string", "description": "Cell (e.g., A1)"},
+                    "formula": {
+                        "type": "string",
+                        "description": "Formula (e.g., =SUM(A1:A10))",
+                    },
+                },
+                "required": ["path", "sheet", "cell", "formula"],
+            },
+        ),
+        Tool(
+            name="excel_format_cell",
+            description="Format a cell (bold, color, size)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "cell": {"type": "string", "description": "Cell (e.g., A1)"},
+                    "bold": {"type": "boolean", "description": "Bold text"},
+                    "font_size": {"type": "integer", "description": "Font size"},
+                    "font_color": {"type": "string", "description": "Hex color code"},
+                    "bg_color": {
+                        "type": "string",
+                        "description": "Background hex color",
+                    },
+                },
+                "required": ["path", "sheet", "cell"],
+            },
+        ),
+        Tool(
+            name="excel_add_table",
+            description="Add a table to a sheet",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": "Table data as 2D array",
+                    },
+                    "start_cell": {
+                        "type": "string",
+                        "description": "Start cell (e.g., A1)",
+                    },
+                },
+                "required": ["path", "sheet", "data", "start_cell"],
+            },
+        ),
+        Tool(
+            name="excel_set_column_width",
+            description="Set column width",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "column": {"type": "string", "description": "Column letter"},
+                    "width": {"type": "number", "description": "Width in characters"},
+                },
+                "required": ["path", "sheet", "column", "width"],
+            },
+        ),
+        Tool(
+            name="excel_merge_cells",
+            description="Merge cells",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                    "sheet": {"type": "string", "description": "Sheet name"},
+                    "start_cell": {
+                        "type": "string",
+                        "description": "Start cell (e.g., A1)",
+                    },
+                    "end_cell": {
+                        "type": "string",
+                        "description": "End cell (e.g., C3)",
+                    },
+                },
+                "required": ["path", "sheet", "start_cell", "end_cell"],
+            },
+        ),
+        Tool(
+            name="excel_list_sheets",
+            description="List all sheets in workbook",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to workbook"},
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="ppt_create",
+            description="Create a new PowerPoint presentation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to save presentation",
+                    },
+                    "title": {"type": "string", "description": "Presentation title"},
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="ppt_add_slide",
+            description="Add a slide to presentation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                    "layout": {
+                        "type": "string",
+                        "description": "Layout type: title, title_content, blank",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="ppt_add_title",
+            description="Add title to slide",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                    "slide_index": {
+                        "type": "integer",
+                        "description": "Slide index (0-based)",
+                    },
+                    "title": {"type": "string", "description": "Title text"},
+                    "font_size": {"type": "integer", "description": "Font size"},
+                },
+                "required": ["path", "slide_index", "title"],
+            },
+        ),
+        Tool(
+            name="ppt_add_text",
+            description="Add text to slide",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                    "slide_index": {
+                        "type": "integer",
+                        "description": "Slide index (0-based)",
+                    },
+                    "text": {"type": "string", "description": "Text content"},
+                    "left": {
+                        "type": "number",
+                        "description": "Left position in inches",
+                    },
+                    "top": {"type": "number", "description": "Top position in inches"},
+                    "width": {"type": "number", "description": "Width in inches"},
+                    "height": {"type": "number", "description": "Height in inches"},
+                },
+                "required": ["path", "slide_index", "text"],
+            },
+        ),
+        Tool(
+            name="ppt_add_image",
+            description="Add image to slide",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                    "slide_index": {
+                        "type": "integer",
+                        "description": "Slide index (0-based)",
+                    },
+                    "image_path": {
+                        "type": "string",
+                        "description": "Path to image file",
+                    },
+                    "left": {
+                        "type": "number",
+                        "description": "Left position in inches",
+                    },
+                    "top": {"type": "number", "description": "Top position in inches"},
+                    "width": {"type": "number", "description": "Width in inches"},
+                },
+                "required": ["path", "slide_index", "image_path"],
+            },
+        ),
+        Tool(
+            name="ppt_add_table",
+            description="Add table to slide",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                    "slide_index": {
+                        "type": "integer",
+                        "description": "Slide index (0-based)",
+                    },
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": "Table data",
+                    },
+                    "left": {
+                        "type": "number",
+                        "description": "Left position in inches",
+                    },
+                    "top": {"type": "number", "description": "Top position in inches"},
+                },
+                "required": ["path", "slide_index", "data"],
+            },
+        ),
+        Tool(
+            name="ppt_list_slides",
+            description="List all slides in presentation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to presentation"},
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="excel_to_pdf",
+            description="Convert Excel workbook to PDF",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "input_path": {"type": "string", "description": "Input Excel path"},
+                    "output_path": {"type": "string", "description": "Output PDF path"},
+                },
+                "required": ["input_path", "output_path"],
+            },
+        ),
+        Tool(
+            name="ppt_to_pdf",
+            description="Convert PowerPoint to PDF",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "input_path": {
+                        "type": "string",
+                        "description": "Input PowerPoint path",
+                    },
+                    "output_path": {"type": "string", "description": "Output PDF path"},
                 },
                 "required": ["input_path", "output_path"],
             },
@@ -1865,6 +2185,294 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             doc.save(docx_path)
             return [TextContent(type="text", text=f"Converted to {docx_path}")]
+
+        elif name == "excel_create":
+            wb = Workbook()
+            ws = wb.active
+            if arguments.get("sheet_name"):
+                ws.title = arguments["sheet_name"]
+            wb.save(arguments["path"])
+            return [
+                TextContent(type="text", text=f"Workbook created: {arguments['path']}")
+            ]
+
+        elif name == "excel_read":
+            wb = load_workbook(arguments["path"], data_only=True)
+            sheet_name = arguments.get("sheet")
+            if sheet_name:
+                ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
+            else:
+                ws = wb.active
+
+            data = []
+            for row in ws.iter_rows(values_only=True):
+                data.append([str(cell) if cell is not None else "" for cell in row])
+
+            return [TextContent(type="text", text=json.dumps(data, indent=2))]
+
+        elif name == "excel_write_cell":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            ws[arguments["cell"]] = arguments["value"]
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Wrote {arguments['value']} to {arguments['cell']}",
+                )
+            ]
+
+        elif name == "excel_add_row":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            ws.append(arguments["data"])
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text", text=f"Added row with {len(arguments['data'])} cells"
+                )
+            ]
+
+        elif name == "excel_add_formula":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            ws[arguments["cell"]] = arguments["formula"]
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Added formula {arguments['formula']} to {arguments['cell']}",
+                )
+            ]
+
+        elif name == "excel_format_cell":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            cell = ws[arguments["cell"]]
+
+            if arguments.get("bold"):
+                cell.font = Font(bold=True)
+
+            if arguments.get("font_size"):
+                cell.font = Font(size=arguments["font_size"])
+
+            if arguments.get("font_color"):
+                rgb = hex_to_rgb(arguments["font_color"])
+                cell.font = Font(color=RGBColor(*rgb))
+
+            if arguments.get("bg_color"):
+                rgb = hex_to_rgb(arguments["bg_color"])
+                cell.fill = PatternFill(start_color=rgb_to_hex(rgb), fill_type="solid")
+
+            wb.save(arguments["path"])
+            return [
+                TextContent(type="text", text=f"Formatted cell {arguments['cell']}")
+            ]
+
+        elif name == "excel_add_table":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+
+            start_cell = arguments["start_cell"]
+            data = arguments["data"]
+
+            for r_idx, row_data in enumerate(data):
+                for c_idx, value in enumerate(row_data):
+                    cell = ws.cell(
+                        row=ws[start_cell].row + r_idx,
+                        column=ws[start_cell].column + c_idx,
+                    )
+                    cell.value = value
+
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Added table with {len(data)} rows and {len(data[0]) if data else 0} columns",
+                )
+            ]
+
+        elif name == "excel_set_column_width":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            col_letter = arguments["column"]
+            ws.column_dimensions[col_letter].width = arguments["width"]
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Set column {arguments['column']} width to {arguments['width']}",
+                )
+            ]
+
+        elif name == "excel_merge_cells":
+            wb = load_workbook(arguments["path"])
+            ws = (
+                wb[arguments["sheet"]]
+                if arguments["sheet"] in wb.sheetnames
+                else wb.active
+            )
+            ws.merge_cells(f"{arguments['start_cell']}:{arguments['end_cell']}")
+            wb.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Merged cells {arguments['start_cell']}:{arguments['end_cell']}",
+                )
+            ]
+
+        elif name == "excel_list_sheets":
+            wb = load_workbook(arguments["path"])
+            sheets = wb.sheetnames
+            return [TextContent(type="text", text=json.dumps(sheets, indent=2))]
+
+        elif name == "ppt_create":
+            prs = Presentation()
+            if arguments.get("title"):
+                title_slide_layout = prs.slide_layouts[0]
+                slide = prs.slides.add_slide(title_slide_layout)
+                title = slide.shapes.title
+                title.text = arguments["title"]
+            prs.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text", text=f"Presentation created: {arguments['path']}"
+                )
+            ]
+
+        elif name == "ppt_add_slide":
+            prs = Presentation(arguments["path"])
+            layout_type = arguments.get("layout", "blank")
+
+            layout_map = {
+                "title": 0,
+                "title_content": 1,
+                "blank": 6,
+            }
+            layout_idx = layout_map.get(layout_type, 6)
+
+            slide = prs.slides.add_slide(prs.slide_layouts[layout_idx])
+            prs.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text", text=f"Added slide at index {len(prs.slides) - 1}"
+                )
+            ]
+
+        elif name == "ppt_add_title":
+            prs = Presentation(arguments["path"])
+            slide = prs.slides[arguments["slide_index"]]
+            title = slide.shapes.title
+            title.text = arguments["title"]
+
+            if arguments.get("font_size"):
+                for paragraph in title.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = PptxPt(arguments["font_size"])
+
+            prs.save(arguments["path"])
+            return [TextContent(type="text", text="Added title to slide")]
+
+        elif name == "ppt_add_text":
+            prs = Presentation(arguments["path"])
+            slide = prs.slides[arguments["slide_index"]]
+
+            left = PptxInches(arguments.get("left", 1))
+            top = PptxInches(arguments.get("top", 1))
+            width = PptxInches(arguments.get("width", 6))
+            height = PptxInches(arguments.get("height", 1))
+
+            txBox = slide.shapes.add_textbox(left, top, width, height)
+            tf = txBox.text_frame
+            tf.text = arguments["text"]
+
+            prs.save(arguments["path"])
+            return [TextContent(type="text", text="Added text to slide")]
+
+        elif name == "ppt_add_image":
+            prs = Presentation(arguments["path"])
+            slide = prs.slides[arguments["slide_index"]]
+
+            left = PptxInches(arguments.get("left", 1))
+            top = PptxInches(arguments.get("top", 1))
+            width = PptxInches(arguments.get("width", 4))
+
+            slide.shapes.add_picture(arguments["image_path"], left, top, width=width)
+
+            prs.save(arguments["path"])
+            return [TextContent(type="text", text="Added image to slide")]
+
+        elif name == "ppt_add_table":
+            prs = Presentation(arguments["path"])
+            slide = prs.slides[arguments["slide_index"]]
+
+            data = arguments["data"]
+            rows = len(data)
+            cols = len(data[0]) if data else 0
+
+            left = PptxInches(arguments.get("left", 1))
+            top = PptxInches(arguments.get("top", 2))
+            width = PptxInches(6)
+            height = PptxInches(rows * 0.75)
+
+            table = slide.shapes.add_table(rows, cols, left, top, width, height).table
+
+            for r_idx, row in enumerate(data):
+                for c_idx, value in enumerate(row):
+                    table.cell(r_idx, c_idx).text = value
+
+            prs.save(arguments["path"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Added table with {rows} rows and {cols} columns",
+                )
+            ]
+
+        elif name == "ppt_list_slides":
+            prs = Presentation(arguments["path"])
+            slides = [{"index": i} for i in range(len(prs.slides))]
+            return [TextContent(type="text", text=json.dumps(slides, indent=2))]
+
+        elif name == "excel_to_pdf":
+            return [
+                TextContent(
+                    type="text",
+                    text="Excel to PDF conversion requires additional libraries. Consider using LibreOffice.",
+                )
+            ]
+
+        elif name == "ppt_to_pdf":
+            return [
+                TextContent(
+                    type="text",
+                    text="PowerPoint to PDF conversion requires additional libraries. Consider using LibreOffice.",
+                )
+            ]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]

@@ -1,9 +1,10 @@
 import pytest
 import json
-import asyncio
 from pathlib import Path
 from docx import Document
-from mcp_office import server, list_tools, call_tool
+from openpyxl import Workbook
+from pptx import Presentation
+from mcp_office import list_tools, call_tool
 
 
 @pytest.fixture
@@ -13,6 +14,23 @@ def temp_doc(tmp_path):
     doc.add_paragraph("Test paragraph")
     doc.save(str(doc_path))
     return str(doc_path)
+
+
+@pytest.fixture
+def temp_xlsx(tmp_path):
+    xlsx_path = tmp_path / "test.xlsx"
+    wb = Workbook()
+    wb.active.append(["Header1", "Header2"])
+    wb.save(str(xlsx_path))
+    return str(xlsx_path)
+
+
+@pytest.fixture
+def temp_pptx(tmp_path):
+    pptx_path = tmp_path / "test.pptx"
+    prs = Presentation()
+    prs.save(str(pptx_path))
+    return str(pptx_path)
 
 
 @pytest.fixture
@@ -29,6 +47,8 @@ async def test_list_tools():
     assert "create_document" in tool_names
     assert "open_document" in tool_names
     assert "pdf_read" in tool_names
+    assert "excel_create" in tool_names
+    assert "ppt_create" in tool_names
 
 
 @pytest.mark.asyncio
@@ -129,3 +149,149 @@ async def test_bullet_list(temp_doc):
 async def test_invalid_tool():
     result = await call_tool("nonexistent_tool", {})
     assert "unknown tool" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_create(tmp_path):
+    path = str(tmp_path / "new_book.xlsx")
+    result = await call_tool("excel_create", {"path": path})
+    assert "created" in result[0].text.lower()
+    assert Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_excel_read(temp_xlsx):
+    result = await call_tool("excel_read", {"path": temp_xlsx})
+    data = json.loads(result[0].text)
+    assert len(data) > 0
+    assert "Header1" in data[0]
+
+
+@pytest.mark.asyncio
+async def test_excel_write_cell(temp_xlsx):
+    result = await call_tool(
+        "excel_write_cell",
+        {"path": temp_xlsx, "sheet": "Sheet", "cell": "A2", "value": "TestValue"},
+    )
+    assert "wrote" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_add_row(temp_xlsx):
+    result = await call_tool(
+        "excel_add_row",
+        {"path": temp_xlsx, "sheet": "Sheet", "data": ["Data1", "Data2"]},
+    )
+    assert "added" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_add_formula(temp_xlsx):
+    result = await call_tool(
+        "excel_add_formula",
+        {"path": temp_xlsx, "sheet": "Sheet", "cell": "C1", "formula": "=SUM(A1:B1)"},
+    )
+    assert "formula" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_format_cell(temp_xlsx):
+    result = await call_tool(
+        "excel_format_cell",
+        {
+            "path": temp_xlsx,
+            "sheet": "Sheet",
+            "cell": "A1",
+            "bold": True,
+            "font_size": 14,
+        },
+    )
+    assert "formatted" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_add_table(temp_xlsx):
+    result = await call_tool(
+        "excel_add_table",
+        {
+            "path": temp_xlsx,
+            "sheet": "Sheet",
+            "data": [["A", "B"], ["1", "2"]],
+            "start_cell": "E1",
+        },
+    )
+    assert "table" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_set_column_width(temp_xlsx):
+    result = await call_tool(
+        "excel_set_column_width",
+        {"path": temp_xlsx, "sheet": "Sheet", "column": "A", "width": 20},
+    )
+    assert "width" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_merge_cells(temp_xlsx):
+    result = await call_tool(
+        "excel_merge_cells",
+        {"path": temp_xlsx, "sheet": "Sheet", "start_cell": "A1", "end_cell": "B1"},
+    )
+    assert "merged" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_list_sheets(temp_xlsx):
+    result = await call_tool("excel_list_sheets", {"path": temp_xlsx})
+    sheets = json.loads(result[0].text)
+    assert len(sheets) >= 1
+
+
+@pytest.mark.asyncio
+async def test_ppt_create(tmp_path):
+    path = str(tmp_path / "new_presentation.pptx")
+    result = await call_tool("ppt_create", {"path": path, "title": "My Presentation"})
+    assert "created" in result[0].text.lower()
+    assert Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_ppt_add_slide(temp_pptx):
+    result = await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "title"})
+    assert "added" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ppt_add_title(temp_pptx):
+    await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "title_content"})
+    result = await call_tool(
+        "ppt_add_title",
+        {"path": temp_pptx, "slide_index": 0, "title": "Slide Title", "font_size": 32},
+    )
+    assert "title" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ppt_add_text(temp_pptx):
+    await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "blank"})
+    result = await call_tool(
+        "ppt_add_text",
+        {
+            "path": temp_pptx,
+            "slide_index": 0,
+            "text": "Sample text",
+            "left": 1,
+            "top": 2,
+            "width": 5,
+            "height": 1,
+        },
+    )
+    assert "text" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ppt_list_slides(temp_pptx):
+    result = await call_tool("ppt_list_slides", {"path": temp_pptx})
+    slides = json.loads(result[0].text)
+    assert isinstance(slides, list)
