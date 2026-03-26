@@ -1,5 +1,7 @@
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
+import xlsxwriter
+import pandas as pd
 
 from mcp_office.base import hex_to_rgb, rgb_to_hex
 from mcp_office.handlers.base import DocumentHandler
@@ -174,6 +176,86 @@ class ExcelHandler(DocumentHandler):
                     "required": ["input_path", "output_path"],
                 },
             ),
+            Tool(
+                name="excel_create_xlsxwriter",
+                description="Create Excel with xlsxwriter (more formatting)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to save workbook",
+                        },
+                        "sheet_name": {"type": "string", "description": "Sheet name"},
+                    },
+                    "required": ["path"],
+                },
+            ),
+            Tool(
+                name="excel_add_chart",
+                description="Add chart to Excel sheet",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to workbook"},
+                        "sheet": {"type": "string", "description": "Sheet name"},
+                        "chart_type": {
+                            "type": "string",
+                            "description": "Chart type: column, line, pie, bar, area, scatter, stock",
+                        },
+                        "data_range": {
+                            "type": "string",
+                            "description": "Data range (e.g., A1:B5)",
+                        },
+                        "title": {"type": "string", "description": "Chart title"},
+                    },
+                    "required": ["path", "chart_type", "data_range"],
+                },
+            ),
+            Tool(
+                name="excel_conditional_format",
+                description="Add conditional formatting",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to workbook"},
+                        "sheet": {"type": "string", "description": "Sheet name"},
+                        "range": {"type": "string", "description": "Cell range"},
+                        "condition": {
+                            "type": "string",
+                            "description": "Condition type",
+                        },
+                        "format": {"type": "string", "description": "Format JSON"},
+                    },
+                    "required": ["path", "sheet", "range", "condition"],
+                },
+            ),
+            Tool(
+                name="excel_pandas_read",
+                description="Read Excel with pandas (returns DataFrame)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to workbook"},
+                        "sheet": {"type": "string", "description": "Sheet name"},
+                        "header": {"type": "integer", "description": "Header row"},
+                    },
+                    "required": ["path"],
+                },
+            ),
+            Tool(
+                name="excel_pandas_to_excel",
+                description="Create Excel from pandas DataFrame",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Output path"},
+                        "data": {"type": "string", "description": "JSON data"},
+                        "sheet_name": {"type": "string", "description": "Sheet name"},
+                    },
+                    "required": ["path", "data"],
+                },
+            ),
         ]
 
     async def execute(self, tool_name: str, arguments: dict) -> list[TextContent]:
@@ -200,6 +282,16 @@ class ExcelHandler(DocumentHandler):
                 return self._list_sheets(arguments)
             elif tool_name == "excel_to_pdf":
                 return self._excel_to_pdf(arguments)
+            elif tool_name == "excel_create_xlsxwriter":
+                return self._create_xlsxwriter(arguments)
+            elif tool_name == "excel_add_chart":
+                return self._add_chart(arguments)
+            elif tool_name == "excel_conditional_format":
+                return self._conditional_format(arguments)
+            elif tool_name == "excel_pandas_read":
+                return self._pandas_read(arguments)
+            elif tool_name == "excel_pandas_to_excel":
+                return self._pandas_to_excel(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
@@ -302,3 +394,73 @@ class ExcelHandler(DocumentHandler):
         return self.success_result(
             "Excel to PDF requires LibreOffice. Install and use: soffice --headless --convert-to pdf input.xlsx"
         )
+
+    def _create_xlsxwriter(self, args: dict) -> list[TextContent]:
+        workbook = xlsxwriter.Workbook(args["path"])
+        workbook.add_worksheet(args.get("sheet_name", "Sheet"))
+        workbook.close()
+        return self.success_result(f"Workbook created: {args['path']}")
+
+    def _add_chart(self, args: dict) -> list[TextContent]:
+        import xlsxwriter
+
+        workbook = xlsxwriter.Workbook(args["path"], {"in_memory": True})
+        ws = workbook.add_worksheet(args.get("sheet", "Sheet"))
+
+        chart_types = {
+            "column": "column",
+            "line": "line",
+            "pie": "pie",
+            "bar": "bar",
+            "area": "area",
+            "scatter": "scatter",
+            "stock": "stock",
+        }
+        chart_type = chart_types.get(args.get("chart_type", "column"), "column")
+
+        chart = workbook.add_chart({"type": chart_type})
+        chart.add_series({"values": args.get("data_range", "Sheet!$A$1:$B$5")})
+
+        if title := args.get("title"):
+            chart.set_title({"name": title})
+
+        ws.insert_chart("E2", chart)
+        workbook.close()
+        return self.success_result(f"Chart added: {args.get('chart_type')}")
+
+    def _conditional_format(self, args: dict) -> list[TextContent]:
+        wb = load_workbook(args["path"])
+        ws = self._get_sheet(wb, args["sheet"])
+
+        format_map = {
+            "greater": "greater_than",
+            "less": "less_than",
+            "between": "between",
+            "equal": "equal",
+            "contains": "text_contains",
+        }
+        condition = format_map.get(args.get("condition", "greater"), "greater_than")
+
+        xlsx_format = wb.add_format({"bg_color": "#FFC7CE", "font_color": "#9C0006"})
+        ws.conditional_format(
+            args["range"], {"type": condition, "value": 0, "format": xlsx_format}
+        )
+
+        wb.save(args["path"])
+        return self.success_result("Conditional formatting added")
+
+    def _pandas_read(self, args: dict) -> list[TextContent]:
+        df = pd.read_excel(
+            args["path"], sheet_name=args.get("sheet"), header=args.get("header")
+        )
+        return [TextContent(type="text", text=df.to_json(orient="records", indent=2))]
+
+    def _pandas_to_excel(self, args: dict) -> list[TextContent]:
+        import json
+
+        data = json.loads(args["data"])
+        df = pd.DataFrame(data)
+        df.to_excel(
+            args["path"], sheet_name=args.get("sheet_name", "Sheet"), index=False
+        )
+        return self.success_result(f"Created Excel from data: {args['path']}")

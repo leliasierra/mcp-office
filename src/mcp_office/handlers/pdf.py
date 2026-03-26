@@ -2,6 +2,9 @@ import fitz
 from pathlib import Path
 from pypdf import PdfReader
 from docx import Document as DocxDocument
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+import img2pdf
 
 from mcp_office.handlers.base import DocumentHandler
 from mcp.types import Tool, TextContent
@@ -200,6 +203,53 @@ class PdfHandler(DocumentHandler):
                     "required": ["input_path", "output_path"],
                 },
             ),
+            Tool(
+                name="pdf_create",
+                description="Create PDF with ReportLab",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Output path"},
+                        "title": {"type": "string", "description": "Document title"},
+                        "page_size": {
+                            "type": "string",
+                            "description": "Page size: letter or A4",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            ),
+            Tool(
+                name="pdf_add_text",
+                description="Add text to PDF (ReportLab)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "PDF path"},
+                        "text": {"type": "string", "description": "Text to add"},
+                        "x": {"type": "number", "description": "X position"},
+                        "y": {"type": "number", "description": "Y position"},
+                        "font_size": {"type": "number", "description": "Font size"},
+                    },
+                    "required": ["path", "text"],
+                },
+            ),
+            Tool(
+                name="pdf_images_to_pdf",
+                description="Convert images to PDF",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "image_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Image file paths",
+                        },
+                        "output": {"type": "string", "description": "Output PDF path"},
+                    },
+                    "required": ["image_paths", "output"],
+                },
+            ),
         ]
 
     async def execute(self, tool_name: str, arguments: dict) -> list[TextContent]:
@@ -232,6 +282,12 @@ class PdfHandler(DocumentHandler):
                 return self._word_to_pdf(arguments)
             elif tool_name == "pdf_to_word":
                 return self._pdf_to_word(arguments)
+            elif tool_name == "pdf_create":
+                return self._pdf_create(arguments)
+            elif tool_name == "pdf_add_text":
+                return self._pdf_add_text(arguments)
+            elif tool_name == "pdf_images_to_pdf":
+                return self._images_to_pdf(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
@@ -338,14 +394,39 @@ class PdfHandler(DocumentHandler):
         return self.success_result("Added page numbers")
 
     def _protect(self, args: dict) -> list[TextContent]:
-        doc = fitz.open(args["path"])
-        output = args.get("output", args["path"])
-        doc.save(output, encryption=fitz.ENCRYPT_AES_256, user_pwd=args["password"])
-        doc.close()
-        return self.success_result("PDF protected with password")
+        import pikepdf
+        from pathlib import Path
+
+        input_path = Path(args["path"])
+        output = args.get("output")
+
+        if not output:
+            output = str(
+                input_path.parent / f"{input_path.stem}_protected{input_path.suffix}"
+            )
+
+        pdf = pikepdf.open(args["path"])
+        pdf.save(
+            output,
+            encryption=pikepdf.Encryption(
+                owner=args["password"], user=args["password"]
+            ),
+        )
+        return self.success_result(f"PDF protected with password: {output}")
 
     def _unprotect(self, args: dict) -> list[TextContent]:
-        return self.success_result("PDF unprotection not supported without password")
+        import pikepdf
+        from pathlib import Path
+
+        try:
+            pdf = pikepdf.open(args["path"], password=args["password"])
+            output = args.get("output", args["path"].replace(".pdf", "_unlocked.pdf"))
+            pdf.save(output)
+            return self.success_result(f"PDF unlocked: {output}")
+        except pikepdf.PasswordError:
+            return self.error_result("Invalid password")
+        except Exception as e:
+            return self.error_result(f"Failed to unlock PDF: {str(e)}")
 
     def _extract_text(self, args: dict) -> list[TextContent]:
         doc = fitz.open(args["path"])
@@ -368,5 +449,28 @@ class PdfHandler(DocumentHandler):
             if text := page.extract_text():
                 doc.add_paragraph(text)
                 doc.add_page_break()
-                doc.save(args["output_path"])
+        doc.save(args["output_path"])
         return self.success_result(f"Converted to {args['output_path']}")
+
+    def _pdf_create(self, args: dict) -> list[TextContent]:
+        page_size = A4 if args.get("page_size", "").upper() == "A4" else letter
+        c = canvas.Canvas(args["path"], pagesize=page_size)
+        if title := args.get("title"):
+            c.setTitle(title)
+        c.save()
+        return self.success_result(f"PDF created: {args['path']}")
+
+    def _pdf_add_text(self, args: dict) -> list[TextContent]:
+        c = canvas.Canvas(args["path"], pagesize=letter)
+        x = args.get("x", 100)
+        y = args.get("y", 700)
+        font_size = args.get("font_size", 12)
+        c.setFont("Helvetica", font_size)
+        c.drawString(x, y, args["text"])
+        c.save()
+        return self.success_result("Text added to PDF")
+
+    def _images_to_pdf(self, args: dict) -> list[TextContent]:
+        with open(args["output"], "wb") as f:
+            f.write(img2pdf.convert(args["image_paths"]))
+        return self.success_result(f"Images converted to PDF: {args['output']}")

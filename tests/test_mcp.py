@@ -4,6 +4,7 @@ from pathlib import Path
 from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
+from reportlab.pdfgen import canvas
 from mcp_office import list_tools, call_tool
 
 
@@ -295,3 +296,137 @@ async def test_ppt_list_slides(temp_pptx):
     result = await call_tool("ppt_list_slides", {"path": temp_pptx})
     slides = json.loads(result[0].text)
     assert isinstance(slides, list)
+
+
+@pytest.mark.asyncio
+async def test_excel_create_xlsxwriter(tmp_path):
+    path = str(tmp_path / "xlsxw.xlsx")
+    result = await call_tool("excel_create_xlsxwriter", {"path": path})
+    assert "created" in result[0].text.lower()
+    assert Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_excel_add_chart(tmp_path):
+    path = str(tmp_path / "chart.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws["A1"] = "Category"
+    ws["B1"] = "Value"
+    ws["A2"] = "A"
+    ws["B2"] = 10
+    ws["A3"] = "B"
+    ws["B3"] = 20
+    wb.save(path)
+
+    result = await call_tool(
+        "excel_add_chart",
+        {
+            "path": path,
+            "chart_type": "column",
+            "data_range": "Sheet!$A$1:$B$3",
+            "title": "Test Chart",
+        },
+    )
+    assert "chart" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_excel_pandas_to_excel(tmp_path):
+    path = str(tmp_path / "pandas.xlsx")
+    data = json.dumps([{"Name": "Alice", "Age": 30}, {"Name": "Bob", "Age": 25}])
+    result = await call_tool(
+        "excel_pandas_to_excel", {"path": path, "data": data, "sheet_name": "Data"}
+    )
+    assert "created" in result[0].text.lower()
+    assert Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_pdf_create(tmp_path):
+    path = str(tmp_path / "new.pdf")
+    result = await call_tool("pdf_create", {"path": path, "title": "Test PDF"})
+    assert "created" in result[0].text.lower()
+    assert Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_pdf_add_text(tmp_path):
+    pdf_path = tmp_path / "test.pdf"
+    c = canvas.Canvas(str(pdf_path))
+    c.save()
+
+    result = await call_tool(
+        "pdf_add_text",
+        {
+            "path": str(pdf_path),
+            "text": "Hello World",
+            "x": 100,
+            "y": 700,
+            "font_size": 12,
+        },
+    )
+    assert "added" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_pdf_protect(tmp_path):
+    pdf_path = tmp_path / "protected.pdf"
+    c = canvas.Canvas(str(pdf_path))
+    c.save()
+
+    result = await call_tool(
+        "pdf_protect",
+        {"path": str(pdf_path), "password": "test123"},
+    )
+    assert "protected" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_pdf_unprotect(tmp_path):
+    pdf_path = tmp_path / "locked.pdf"
+    c = canvas.Canvas(str(pdf_path))
+    c.save()
+
+    await call_tool("pdf_protect", {"path": str(pdf_path), "password": "test123"})
+
+    unlocked_path = tmp_path / "unlocked.pdf"
+    result = await call_tool(
+        "pdf_unprotect",
+        {"path": str(pdf_path), "password": "test123", "output": str(unlocked_path)},
+    )
+    assert "unlocked" in result[0].text.lower()
+    assert unlocked_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_create_from_spec(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec = {
+        "content": [
+            {"type": "heading", "text": "Title", "level": 1},
+            {"type": "paragraph", "text": "Hello world", "bold": True},
+            {"type": "table", "data": [["A", "B"], ["1", "2"]]},
+        ]
+    }
+    with open(spec_path, "w") as f:
+        json.dump(spec, f)
+
+    output_path = tmp_path / "output.docx"
+    result = await call_tool(
+        "create_from_spec",
+        {"spec_path": str(spec_path), "output_path": str(output_path)},
+    )
+    assert "created" in result[0].text.lower()
+    assert output_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_save_document_spec(temp_doc, tmp_path):
+    output_path = tmp_path / "spec.json"
+    result = await call_tool(
+        "save_document_spec",
+        {"path": temp_doc, "output_path": str(output_path)},
+    )
+    assert "saved" in result[0].text.lower()
+    assert output_path.exists()

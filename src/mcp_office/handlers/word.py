@@ -206,40 +206,36 @@ class WordHandler(DocumentHandler):
                 },
             ),
             Tool(
-                name="format_text_range",
-                description="Format text ranges",
+                name="create_from_spec",
+                description="Create document from JSON specification",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Document path"},
-                        "start_text": {"type": "string", "description": "Start text"},
-                        "end_text": {"type": "string", "description": "End text"},
-                        "bold": {"type": "boolean", "description": "Bold text"},
+                        "spec_path": {
+                            "type": "string",
+                            "description": "JSON spec path",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Output document path",
+                        },
                     },
-                    "required": ["path", "start_text", "end_text"],
+                    "required": ["spec_path", "output_path"],
                 },
             ),
             Tool(
-                name="protect_document",
-                description="Protect document with password",
+                name="save_document_spec",
+                description="Save document specification to JSON for reuse",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Document path"},
-                        "password": {"type": "string", "description": "Password"},
+                        "output_path": {
+                            "type": "string",
+                            "description": "JSON output path",
+                        },
                     },
-                    "required": ["path", "password"],
-                },
-            ),
-            Tool(
-                name="extract_comments",
-                description="Extract comments from document",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Document path"},
-                    },
-                    "required": ["path"],
+                    "required": ["path", "output_path"],
                 },
             ),
         ]
@@ -278,6 +274,10 @@ class WordHandler(DocumentHandler):
                 return self._protect_document(arguments)
             elif tool_name == "extract_comments":
                 return self._extract_comments(arguments)
+            elif tool_name == "create_from_spec":
+                return self._create_from_spec(arguments)
+            elif tool_name == "save_document_spec":
+                return self._save_document_spec(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
@@ -438,3 +438,67 @@ class WordHandler(DocumentHandler):
         except AttributeError:
             pass
         return [TextContent(type="text", text=json.dumps(comments, indent=2))]
+
+    def _create_from_spec(self, args: dict) -> list[TextContent]:
+        with open(args["spec_path"]) as f:
+            spec = json.load(f)
+
+        doc = Document()
+
+        for item in spec.get("content", []):
+            if item["type"] == "heading":
+                doc.add_heading(item["text"], item.get("level", 1))
+            elif item["type"] == "paragraph":
+                p = doc.add_paragraph(item.get("text", ""))
+                if item.get("bold"):
+                    for run in p.runs:
+                        run.bold = True
+            elif item["type"] == "table":
+                table = doc.add_table(rows=len(item["data"]), cols=len(item["data"][0]))
+                for i, row in enumerate(item["data"]):
+                    for j, cell in enumerate(row):
+                        table.rows[i].cells[j].text = cell
+            elif item["type"] == "image":
+                width = Inches(item.get("width", 5))
+                doc.add_picture(item["path"], width=width)
+            elif item["type"] == "page_break":
+                doc.add_page_break()
+            elif item["type"] == "list":
+                style = "List Number" if item.get("numbered") else "List Bullet"
+                for list_item in item.get("items", []):
+                    doc.add_paragraph(list_item, style=style)
+
+        output_path = args.get(
+            "output_path", args["spec_path"].replace(".json", ".docx")
+        )
+        doc.save(output_path)
+
+        return self.success_result(f"Document created from spec: {output_path}")
+
+    def _save_document_spec(self, args: dict) -> list[TextContent]:
+        doc = Document(args["path"])
+        spec = {"content": []}
+
+        for para in doc.paragraphs:
+            if para.style.name.startswith("Heading"):
+                level = int(para.style.name[-1]) if para.style.name[-1].isdigit() else 1
+                spec["content"].append(
+                    {"type": "heading", "text": para.text, "level": level}
+                )
+            else:
+                is_bold = any(run.bold for run in para.runs if run.text)
+                spec["content"].append(
+                    {"type": "paragraph", "text": para.text, "bold": is_bold}
+                )
+
+        for table in doc.tables:
+            data = [[cell.text for cell in row.cells] for row in table.rows]
+            spec["content"].append({"type": "table", "data": data})
+
+        output_path = args.get(
+            "output_path", args["path"].replace(".docx", "_spec.json")
+        )
+        with open(output_path, "w") as f:
+            json.dump(spec, f, indent=2)
+
+        return self.success_result(f"Document spec saved: {output_path}")
