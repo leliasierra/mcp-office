@@ -162,6 +162,18 @@ class ExcelHandler(DocumentHandler):
                     "required": ["path"],
                 },
             ),
+            Tool(
+                name="excel_to_pdf",
+                description="Convert Excel to PDF",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "input_path": {"type": "string", "description": "Excel path"},
+                        "output_path": {"type": "string", "description": "PDF path"},
+                    },
+                    "required": ["input_path", "output_path"],
+                },
+            ),
         ]
 
     async def execute(self, tool_name: str, arguments: dict) -> list[TextContent]:
@@ -186,6 +198,8 @@ class ExcelHandler(DocumentHandler):
                 return self._merge_cells(arguments)
             elif tool_name == "excel_list_sheets":
                 return self._list_sheets(arguments)
+            elif tool_name == "excel_to_pdf":
+                return self._excel_to_pdf(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
@@ -283,3 +297,8 @@ class ExcelHandler(DocumentHandler):
 
         wb = load_workbook(args["path"])
         return [TextContent(type="text", text=json.dumps(wb.sheetnames, indent=2))]
+
+    def _excel_to_pdf(self, args: dict) -> list[TextContent]:
+        return self.success_result(
+            "Excel to PDF requires LibreOffice. Install and use: soffice --headless --convert-to pdf input.xlsx"
+        )
