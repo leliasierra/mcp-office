@@ -416,7 +416,6 @@ class PdfHandler(DocumentHandler):
 
     def _unprotect(self, args: dict) -> list[TextContent]:
         import pikepdf
-        from pathlib import Path
 
         try:
             pdf = pikepdf.open(args["path"], password=args["password"])
