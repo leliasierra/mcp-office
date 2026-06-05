@@ -2,7 +2,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from mcp_office.handlers import WordHandler, ExcelHandler, PptHandler, PdfHandler
+from mcp_office.handlers import WordHandler, ExcelHandler, PptHandler, PdfHandler, OcrHandler
 
 
 server = Server("mcp-office")
@@ -12,6 +12,7 @@ _handlers = [
     ExcelHandler(),
     PptHandler(),
     PdfHandler(),
+    OcrHandler(),
 ]
 
 

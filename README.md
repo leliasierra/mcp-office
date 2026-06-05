@@ -74,14 +74,16 @@ Add to your `opencode.json`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "office": {
       "type": "local",
-      "command": ["python", "-c", "import asyncio;from mcp_office import main;asyncio.run(main())"],
+      "command": ["C:\\Dev\\htdocs-uv\\mcp-project\\.venv\\Scripts\\python.exe", "-c", "import asyncio;from mcp_office import main;asyncio.run(main())"],
       "enabled": true,
       "environment": {
-        "PYTHONPATH": "path/to/mcp-office/src"
-      }
+        "PYTHONPATH": "C:\\Dev\\htdocs-uv\\mcp-project\\src"
+      },
+      "timeout": 30000
     }
   }
 }
