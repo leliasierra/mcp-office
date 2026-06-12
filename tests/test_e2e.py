@@ -18,9 +18,9 @@ class TestE2E:
 
         assert "create_document" in tool_names
         assert "excel_create" in tool_names
-        assert "ppt_create" in tool_names
+        assert "ppt_generate" in tool_names
         assert "pdf_read" in tool_names
-        assert len(tool_names) > 30
+        assert len(tool_names) > 15
 
     @pytest.mark.asyncio
     async def test_mcp_execute_word_flow(self, tmp_path):
@@ -88,25 +88,25 @@ class TestE2E:
 
     @pytest.mark.asyncio
     async def test_mcp_execute_ppt_flow(self, tmp_path):
-        """Test complete PowerPoint workflow"""
+        """Test complete PowerPoint workflow with ppt-master"""
         from mcp_office import call_tool
 
+        svg_dir = tmp_path / "slides"
+        svg_dir.mkdir()
+        svg = svg_dir / "slide.svg"
+        svg.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">'
+            '<rect width="1280" height="720" fill="#1a1a2e"/>'
+            '<text x="640" y="360" text-anchor="middle" font-size="48" fill="white">'
+            "Hello</text></svg>"
+        )
+
         pptx_path = tmp_path / "presentation.pptx"
-
-        await call_tool(
-            "ppt_create", {"path": str(pptx_path), "title": "Company Overview"}
+        result = await call_tool(
+            "ppt_generate", {"svg_source": str(svg_dir), "output": str(pptx_path)}
         )
-        await call_tool(
-            "ppt_add_slide", {"path": str(pptx_path), "layout": "title_content"}
-        )
-        await call_tool(
-            "ppt_add_title",
-            {"path": str(pptx_path), "slide_index": 0, "title": "Welcome"},
-        )
-
-        result = await call_tool("ppt_list_slides", {"path": str(pptx_path)})
-        slides = json.loads(result[0].text)
-        assert len(slides) >= 1
+        assert "generated" in result[0].text.lower()
+        assert pptx_path.exists()
 
     @pytest.mark.asyncio
     async def test_mcp_unknown_tool_returns_error(self):

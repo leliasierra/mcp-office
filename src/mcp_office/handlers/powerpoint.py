@@ -1,648 +1,456 @@
-from pptx import Presentation
-from pptx.util import Inches as PptxInches, Pt as PptxPt
-from pptx.dml.color import RGBColor as PptxRGBColor
-from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.chart import XL_CHART_TYPE
-from pptx.chart.data import CategoryChartData
+import re
+import sys
+import shutil
+import tempfile
+import urllib.parse
+from pathlib import Path
+
+from mcp.types import Tool, TextContent
 
 from mcp_office.handlers.base import DocumentHandler
-from mcp.types import Tool, TextContent
+from mcp_office.spec import SpecManager
+
+
+PPT_MASTER_SCRIPTS = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "sources"
+    / "ppt-master-main"
+    / "skills"
+    / "ppt-master"
+    / "scripts"
+)
+
+PPT_MASTER_SOURCE_TO_MD = PPT_MASTER_SCRIPTS / "source_to_md"
+
+# All 8 canvas formats from ppt-master config.py
+CANVAS_FORMATS = {
+    "ppt169": "PPT 16:9 (1280x720) — modern projectors",
+    "ppt43": "PPT 4:3 (1024x768) — traditional projectors",
+    "wechat": "WeChat header (900x383)",
+    "xiaohongshu": "Xiaohongshu (1242x1660)",
+    "moments": "Instagram/Square (1080x1080)",
+    "story": "Vertical Story (1080x1920)",
+    "banner": "Horizontal banner (1920x1080)",
+    "a4": "A4 print (1240x1754)",
+}
+
+TRANSITIONS = ["fade", "push", "wipe", "split", "strips", "cover", "random", "none"]
+ANIMATIONS = ["auto", "fade", "fly", "zoom", "appear", "mixed", "random", "none"]
+ANIMATION_TRIGGERS = ["after-previous", "on-click", "with-previous"]
+
+SUPPORTED_SOURCE_EXTENSIONS = {
+    ".pdf": "PDF document",
+    ".docx": "Word document",
+    ".doc": "Word 97-2003 (requires pandoc)",
+    ".odt": "OpenDocument Text (requires pandoc)",
+    ".rtf": "Rich Text Format (requires pandoc)",
+    ".html": "HTML page",
+    ".htm": "HTML page",
+    ".epub": "EPUB ebook",
+    ".ipynb": "Jupyter Notebook",
+    ".md": "Markdown",
+    ".markdown": "Markdown",
+    ".pptx": "PowerPoint presentation",
+    ".pptm": "Macro-enabled PowerPoint",
+    ".ppsx": "PowerPoint slideshow",
+    ".ppsm": "Macro-enabled slideshow",
+    ".potx": "PowerPoint template",
+    ".potm": "Macro-enabled template",
+    ".xlsx": "Excel workbook",
+    ".xlsm": "Macro-enabled workbook",
+    ".tex": "LaTeX (requires pandoc)",
+    ".latex": "LaTeX (requires pandoc)",
+    ".rst": "reStructuredText (requires pandoc)",
+    ".org": "Emacs Org-mode (requires pandoc)",
+    ".typ": "Typst (requires pandoc)",
+}
 
 
 class PptHandler(DocumentHandler):
-    """Handler for PowerPoint operations"""
+    """Handler for PowerPoint operations using ppt-master engine"""
+
+    def __init__(self):
+        self._scripts_loaded = False
+
+    def _ensure_ppt_master(self):
+        if self._scripts_loaded:
+            return
+        scripts_dir = str(PPT_MASTER_SCRIPTS.resolve())
+        if not Path(scripts_dir).exists():
+            raise FileNotFoundError(
+                f"ppt-master scripts not found at {scripts_dir}. "
+                f"Clone ppt-master to: {PPT_MASTER_SCRIPTS.parent.parent}"
+            )
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        if str(PPT_MASTER_SOURCE_TO_MD.resolve()) not in sys.path:
+            sys.path.insert(0, str(PPT_MASTER_SOURCE_TO_MD.resolve()))
+        self._scripts_loaded = True
 
     def get_tools(self) -> list[Tool]:
         return [
-            Tool(
-                name="ppt_create",
-                description="Create a new PowerPoint presentation",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Save path"},
-                        "title": {"type": "string", "description": "Title"},
-                    },
-                    "required": ["path"],
-                },
-            ),
-            Tool(
-                name="ppt_add_slide",
-                description="Add a slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "layout": {"type": "string", "description": "Layout type"},
-                    },
-                    "required": ["path"],
-                },
-            ),
-            Tool(
-                name="ppt_add_title",
-                description="Add title to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "title": {"type": "string", "description": "Title text"},
-                        "font_size": {"type": "integer", "description": "Font size"},
-                    },
-                    "required": ["path", "slide_index", "title"],
-                },
-            ),
-            Tool(
-                name="ppt_add_text",
-                description="Add text to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "text": {"type": "string", "description": "Text"},
-                        "left": {"type": "number", "description": "Left position"},
-                        "top": {"type": "number", "description": "Top position"},
-                        "width": {"type": "number", "description": "Width"},
-                        "height": {"type": "number", "description": "Height"},
-                    },
-                    "required": ["path", "slide_index", "text"],
-                },
-            ),
-            Tool(
-                name="ppt_add_image",
-                description="Add image to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "image_path": {"type": "string", "description": "Image path"},
-                        "left": {"type": "number", "description": "Left"},
-                        "top": {"type": "number", "description": "Top"},
-                        "width": {"type": "number", "description": "Width"},
-                    },
-                    "required": ["path", "slide_index", "image_path"],
-                },
-            ),
-            Tool(
-                name="ppt_add_table",
-                description="Add table to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "data": {
-                            "type": "array",
-                            "items": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "left": {"type": "number", "description": "Left"},
-                        "top": {"type": "number", "description": "Top"},
-                    },
-                    "required": ["path", "slide_index", "data"],
-                },
-            ),
-            Tool(
-                name="ppt_list_slides",
-                description="List slides",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                    },
-                    "required": ["path"],
-                },
-            ),
-            Tool(
-                name="ppt_set_background",
-                description="Set slide background color",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "color": {
-                            "type": "string",
-                            "description": "Hex color (e.g., #FF0000)",
-                        },
-                    },
-                    "required": ["path", "slide_index", "color"],
-                },
-            ),
-            Tool(
-                name="ppt_add_shape",
-                description="Add shape to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "shape_type": {"type": "string", "description": "Shape type"},
-                        "left": {"type": "number", "description": "Left position"},
-                        "top": {"type": "number", "description": "Top position"},
-                        "width": {"type": "number", "description": "Width"},
-                        "height": {"type": "number", "description": "Height"},
-                        "color": {"type": "string", "description": "Fill color hex"},
-                    },
-                    "required": ["path", "slide_index", "shape_type"],
-                },
-            ),
-            Tool(
-                name="ppt_format_text",
-                description="Format text with colors and styles",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "text": {"type": "string", "description": "Text to format"},
-                        "bold": {"type": "boolean", "description": "Bold"},
-                        "italic": {"type": "boolean", "description": "Italic"},
-                        "font_size": {"type": "integer", "description": "Font size"},
-                        "font_color": {
-                            "type": "string",
-                            "description": "Font color hex",
-                        },
-                        "bg_color": {
-                            "type": "string",
-                            "description": "Background color hex",
-                        },
-                    },
-                    "required": ["path", "slide_index", "text"],
-                },
-            ),
-            Tool(
-                name="ppt_set_theme",
-                description="Apply theme colors to presentation",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "primary_color": {
-                            "type": "string",
-                            "description": "Primary color hex",
-                        },
-                    },
-                    "required": ["path"],
-                },
-            ),
-            Tool(
-                name="ppt_add_chart",
-                description="Add chart to slide",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "chart_type": {
-                            "type": "string",
-                            "description": "Chart type: column, bar, line, pie, area",
-                        },
-                        "categories": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Categories",
-                        },
-                        "values": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "description": "Values",
-                        },
-                        "title": {"type": "string", "description": "Chart title"},
-                        "left": {"type": "number", "description": "Left position"},
-                        "top": {"type": "number", "description": "Top position"},
-                        "width": {"type": "number", "description": "Width"},
-                        "height": {"type": "number", "description": "Height"},
-                    },
-                    "required": [
-                        "path",
-                        "slide_index",
-                        "chart_type",
-                        "categories",
-                        "values",
-                    ],
-                },
-            ),
-            Tool(
-                name="ppt_add_bullet_slide",
-                description="Add bullet slide with formatted text",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "title": {"type": "string", "description": "Slide title"},
-                        "bullets": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Bullet points",
-                        },
-                    },
-                    "required": ["path", "title", "bullets"],
-                },
-            ),
-            Tool(
-                name="ppt_set_slide_layout",
-                description="Set slide layout",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "layout": {
-                            "type": "string",
-                            "description": "Layout: title, title_content, bullet, blank, title_only",
-                        },
-                    },
-                    "required": ["path", "slide_index", "layout"],
-                },
-            ),
-            Tool(
-                name="ppt_add_textbox",
-                description="Add formatted textbox",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                        "slide_index": {
-                            "type": "integer",
-                            "description": "Slide index",
-                        },
-                        "text": {"type": "string", "description": "Text content"},
-                        "left": {"type": "number", "description": "Left position"},
-                        "top": {"type": "number", "description": "Top position"},
-                        "width": {"type": "number", "description": "Width"},
-                        "height": {"type": "number", "description": "Height"},
-                        "font_size": {"type": "integer", "description": "Font size"},
-                        "bold": {"type": "boolean", "description": "Bold text"},
-                        "color": {"type": "string", "description": "Text color hex"},
-                    },
-                    "required": ["path", "slide_index", "text"],
-                },
-            ),
-            Tool(
-                name="ppt_extract_text",
-                description="Extract all text from presentation",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Presentation path"},
-                    },
-                    "required": ["path"],
-                },
-            ),
+            self._ppt_generate_tool(),
+            self._ppt_convert_source_tool(),
         ]
+
+    def _ppt_generate_tool(self) -> Tool:
+        fmt_desc = "Canvas format: " + ", ".join(
+            f"{k} ({v})" for k, v in CANVAS_FORMATS.items()
+        ) + ". Default: ppt169"
+        trans_desc = "Slide transition: " + ", ".join(TRANSITIONS) + ". Default: fade"
+        anim_desc = "Entrance animation: " + ", ".join(ANIMATIONS) + ". Default: auto"
+        trigger_desc = "Animation trigger: " + ", ".join(ANIMATION_TRIGGERS) + ". Default: after-previous"
+
+        return Tool(
+            name="ppt_generate",
+            description=(
+                "Generate a native editable PPTX from SVG files using the "
+                "ppt-master conversion engine. Accepts a directory of SVG "
+                "files or a ppt-master project directory (with svg_output/). "
+                "Returns path to the generated .pptx."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "svg_source": {
+                        "type": "string",
+                        "description": (
+                            "Directory containing SVG slide files, or a "
+                            "ppt-master project directory (with svg_output/)"
+                        ),
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Output path for the .pptx file",
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": fmt_desc,
+                    },
+                    "transition": {
+                        "type": "string",
+                        "description": trans_desc,
+                    },
+                    "transition_duration": {
+                        "type": "number",
+                        "description": "Transition duration in seconds. Default: 0.5",
+                    },
+                    "animation": {
+                        "type": "string",
+                        "description": anim_desc,
+                    },
+                    "animation_duration": {
+                        "type": "number",
+                        "description": "Per-element animation duration in seconds. Default: 0.4",
+                    },
+                    "animation_stagger": {
+                        "type": "number",
+                        "description": "Delay between animated elements in seconds. Default: 0.5",
+                    },
+                    "animation_trigger": {
+                        "type": "string",
+                        "description": trigger_desc,
+                    },
+                    "auto_advance": {
+                        "type": "number",
+                        "description": "Auto-advance interval in seconds (kiosk mode). Omit for manual advance.",
+                    },
+                    "merge_paragraphs": {
+                        "type": "boolean",
+                        "description": "Merge dy-stacked paragraphs into one editable text frame. Default: true",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Document title metadata",
+                    },
+                    "author": {
+                        "type": "string",
+                        "description": "Document author metadata",
+                    },
+                },
+                "required": ["svg_source", "output"],
+            },
+        )
+
+    def _ppt_convert_source_tool(self) -> Tool:
+        exts = ", ".join(sorted(SUPPORTED_SOURCE_EXTENSIONS.keys()))
+        return Tool(
+            name="ppt_convert_source",
+            description=(
+                "Convert a source document (PDF, DOCX, PPTX, XLSX, URL, etc.) "
+                "to Markdown text using ppt-master converters. Returns the "
+                "extracted Markdown content and saves it to a file."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": (
+                            f"Path to a source file ({exts}) or a URL"
+                        ),
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Optional output path for the .md file. Auto-derived if omitted.",
+                    },
+                },
+                "required": ["source"],
+            },
+        )
 
     async def execute(self, tool_name: str, arguments: dict) -> list[TextContent]:
         try:
-            if tool_name == "ppt_create":
-                return self._create(arguments)
-            elif tool_name == "ppt_add_slide":
-                return self._add_slide(arguments)
-            elif tool_name == "ppt_add_title":
-                return self._add_title(arguments)
-            elif tool_name == "ppt_add_text":
-                return self._add_text(arguments)
-            elif tool_name == "ppt_add_image":
-                return self._add_image(arguments)
-            elif tool_name == "ppt_add_table":
-                return self._add_table(arguments)
-            elif tool_name == "ppt_list_slides":
-                return self._list_slides(arguments)
-            elif tool_name == "ppt_set_background":
-                return self._set_background(arguments)
-            elif tool_name == "ppt_add_shape":
-                return self._add_shape(arguments)
-            elif tool_name == "ppt_format_text":
-                return self._format_text(arguments)
-            elif tool_name == "ppt_set_theme":
-                return self._set_theme(arguments)
-            elif tool_name == "ppt_add_chart":
-                return self._add_chart(arguments)
-            elif tool_name == "ppt_add_bullet_slide":
-                return self._add_bullet_slide(arguments)
-            elif tool_name == "ppt_set_slide_layout":
-                return self._set_slide_layout(arguments)
-            elif tool_name == "ppt_add_textbox":
-                return self._add_textbox(arguments)
-            elif tool_name == "ppt_extract_text":
-                return self._extract_text(arguments)
+            if tool_name == "ppt_generate":
+                return self._generate(arguments)
+            if tool_name == "ppt_convert_source":
+                return self._convert_source(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
 
-    def _create(self, args: dict) -> list[TextContent]:
-        prs = Presentation()
-        if title := args.get("title"):
-            slide = prs.slides.add_slide(prs.slide_layouts[0])
-            slide.shapes.title.text = title
-        prs.save(args["path"])
-        return self.success_result(f"Presentation created: {args['path']}")
+    # ── ppt_generate ──────────────────────────────────────────
 
-    def _add_slide(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        layout_map = {"title": 0, "title_content": 1, "blank": 6}
-        idx = layout_map.get(args.get("layout", "blank"), 6)
-        prs.slides.add_slide(prs.slide_layouts[idx])
-        prs.save(args["path"])
-        return self.success_result(f"Added slide at index {len(prs.slides) - 1}")
+    def _collect_svg_files(self, source: Path) -> tuple[list[Path], Path]:
+        source = source.resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"svg_source not found: {source}")
+        if source.is_file():
+            if source.suffix.lower() != ".svg":
+                raise ValueError(f"File is not an SVG: {source}")
+            return [source], source.parent
+        for sub in ["svg_final", "svg_output"]:
+            d = source / sub
+            if d.exists():
+                files = sorted(d.glob("*.svg"))
+                if files:
+                    return files, d
+        files = sorted(source.glob("*.svg"))
+        if files:
+            return files, source
+        raise FileNotFoundError(f"No SVG files found in: {source}")
 
-    def _add_title(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
-        title = slide.shapes.title
-        title.text = args["title"]
-        if fs := args.get("font_size"):
-            for p in title.text_frame.paragraphs:
-                for r in p.runs:
-                    r.font.size = PptxPt(fs)
-        prs.save(args["path"])
-        return self.success_result("Added title to slide")
+    def _ensure_project_structure(self, svg_source: Path) -> tuple[Path, list[Path], bool]:
+        svg_source = svg_source.resolve()
+        # Already a project dir with svg_output/
+        if (svg_source / "svg_output").exists():
+            svg_files, _ = self._collect_svg_files(svg_source)
+            return svg_source, svg_files, False
+        # Single SVG file
+        if svg_source.is_file():
+            if svg_source.suffix.lower() != ".svg":
+                raise ValueError(f"Not an SVG file: {svg_source}")
+            tmpdir = Path(tempfile.mkdtemp(prefix="pptgen_"))
+            svg_output = tmpdir / "svg_output"
+            svg_output.mkdir(parents=True)
+            shutil.copy2(svg_source, svg_output / svg_source.name)
+            return tmpdir, [svg_output / svg_source.name], True
+        # Directory: find SVG files, copy into tmp project
+        svg_files, _ = self._collect_svg_files(svg_source)
+        if svg_files:
+            tmpdir = Path(tempfile.mkdtemp(prefix="pptgen_"))
+            svg_output = tmpdir / "svg_output"
+            svg_output.mkdir(parents=True)
+            for f in svg_files:
+                shutil.copy2(f, svg_output / f.name)
+            return tmpdir, svg_files, True
+        raise FileNotFoundError(f"No SVG files found in: {svg_source}")
 
-    def _add_text(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
-        left = PptxInches(args.get("left", 1))
-        top = PptxInches(args.get("top", 1))
-        width = PptxInches(args.get("width", 6))
-        height = PptxInches(args.get("height", 1))
-        txBox = slide.shapes.add_textbox(left, top, width, height)
-        txBox.text_frame.text = args["text"]
-        prs.save(args["path"])
-        return self.success_result("Added text to slide")
+    def _generate(self, args: dict) -> list[TextContent]:
+        self._ensure_ppt_master()
 
-    def _add_image(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
-        left = PptxInches(args.get("left", 1))
-        top = PptxInches(args.get("top", 1))
-        width = PptxInches(args.get("width", 4))
-        slide.shapes.add_picture(args["image_path"], left, top, width=width)
-        prs.save(args["path"])
-        return self.success_result("Added image to slide")
+        svg_source = Path(args["svg_source"])
+        output_path = Path(args["output"])
+        canvas_format = args.get("format", "ppt169")
+        transition = args.get("transition", "fade")
+        transition_duration = args.get("transition_duration", 0.5)
+        animation = args.get("animation", "auto")
+        animation_duration = args.get("animation_duration", 0.4)
+        animation_stagger = args.get("animation_stagger", 0.5)
+        animation_trigger = args.get("animation_trigger", "after-previous")
+        auto_advance = args.get("auto_advance")
+        merge_paragraphs = args.get("merge_paragraphs", True)
+        title = args.get("title")
+        author = args.get("author")
 
-    def _add_table(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
-        data = args["data"]
-        rows, cols = len(data), len(data[0])
-        left = PptxInches(args.get("left", 1))
-        top = PptxInches(args.get("top", 2))
-        table = slide.shapes.add_table(rows, cols, left, top).table
-        for r_idx, row in enumerate(data):
-            for c_idx, val in enumerate(row):
-                table.cell(r_idx, c_idx).text = val
-        prs.save(args["path"])
-        return self.success_result(f"Added table {rows}x{cols}")
+        if canvas_format not in CANVAS_FORMATS:
+            valid = ", ".join(CANVAS_FORMATS.keys())
+            raise ValueError(f"Unknown format '{canvas_format}'. Valid: {valid}")
+        if transition not in TRANSITIONS:
+            raise ValueError(f"Unknown transition '{transition}'. Valid: {', '.join(TRANSITIONS)}")
+        if animation not in ANIMATIONS:
+            raise ValueError(f"Unknown animation '{animation}'. Valid: {', '.join(ANIMATIONS)}")
+        if animation_trigger not in ANIMATION_TRIGGERS:
+            raise ValueError(f"Unknown trigger '{animation_trigger}'. Valid: {', '.join(ANIMATION_TRIGGERS)}")
 
-    def _list_slides(self, args: dict) -> list[TextContent]:
-        import json
+        project_dir, svg_files, was_temp = self._ensure_project_structure(svg_source)
 
-        prs = Presentation(args["path"])
-        slides = [{"index": i} for i in range(len(prs.slides))]
-        return [TextContent(type="text", text=json.dumps(slides, indent=2))]
+        try:
+            from finalize_svg import finalize_project
 
-    def _set_background(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
+            options = {
+                "embed_icons": True,
+                "align_images": True,
+                "flatten_text": True,
+                "fix_rounded": True,
+            }
+            finalize_project(project_dir, options, quiet=True)
 
-        background = slide.background
-        fill = background.fill
-        fill.solid()
+            from svg_to_pptx.pptx_discovery import find_svg_files, find_notes_files
+            from svg_to_pptx.pptx_builder import create_pptx_with_native_svg
 
-        color = args.get("color", "#FF0000").lstrip("#")
-        r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-        fill.fore_color.rgb = PptxRGBColor(r, g, b)
+            final_svgs, _ = find_svg_files(project_dir, source="final")
+            if not final_svgs:
+                final_svgs = svg_files
 
-        prs.save(args["path"])
-        return self.success_result("Background color set")
+            notes = find_notes_files(project_dir, final_svgs)
 
-    def _add_shape(self, args: dict) -> list[TextContent]:
-        from mcp_office.base import hex_to_rgb
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
+            doc_metadata = {}
+            if title:
+                doc_metadata["title"] = title
+            if author:
+                doc_metadata["author"] = author
 
-        shape_map = {
-            "rectangle": MSO_SHAPE.RECTANGLE,
-            "oval": MSO_SHAPE.OVAL,
-            "diamond": MSO_SHAPE.DIAMOND,
-            "triangle": MSO_SHAPE.TRIANGLE,
-            "star": MSO_SHAPE.STAR_5,
-            "arrow": MSO_SHAPE.ARROW_RIGHT,
-        }
+            success = create_pptx_with_native_svg(
+                svg_files=final_svgs,
+                output_path=output_path,
+                canvas_format=canvas_format,
+                verbose=False,
+                transition=transition,
+                transition_duration=transition_duration,
+                animation=animation,
+                animation_duration=animation_duration,
+                animation_stagger=animation_stagger,
+                animation_trigger=animation_trigger,
+                auto_advance=auto_advance,
+                merge_paragraphs=merge_paragraphs,
+                use_native_shapes=True,
+                enable_notes=bool(notes),
+                notes=notes,
+                doc_metadata=doc_metadata or None,
+            )
 
-        shape_type = shape_map.get(
-            args.get("shape_type", "rectangle").lower(), MSO_SHAPE.RECTANGLE
-        )
+            if not success:
+                return self.error_result("PPTX generation failed")
 
-        left = PptxInches(args.get("left", 1))
-        top = PptxInches(args.get("top", 1))
-        width = PptxInches(args.get("width", 2))
-        height = PptxInches(args.get("height", 2))
+            SpecManager("powerpoint", str(output_path)).append({
+                "type": "generate",
+                "svg_source": str(svg_source),
+                "format": canvas_format,
+                "slides": len(final_svgs),
+            })
 
-        shape = slide.shapes.add_shape(shape_type, left, top, width, height)
+            return self.success_result(
+                f"Presentation generated: {output_path} ({len(final_svgs)} slides)"
+            )
+        finally:
+            if was_temp:
+                shutil.rmtree(project_dir, ignore_errors=True)
 
-        if color := args.get("color"):
-            rgb = hex_to_rgb(color)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = PptxRGBColor(*rgb)
+    # ── ppt_convert_source ────────────────────────────────────
 
-        prs.save(args["path"])
-        return self.success_result(f"Shape added: {args.get('shape_type')}")
+    def _is_url(self, source: str) -> bool:
+        parsed = urllib.parse.urlparse(source)
+        return parsed.scheme in ("http", "https")
 
-    def _format_text(self, args: dict) -> list[TextContent]:
-        from mcp_office.base import hex_to_rgb
+    def _convert_source(self, args: dict) -> list[TextContent]:
+        self._ensure_ppt_master()
 
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
+        source = args["source"]
+        output_path = args.get("output")
 
-        for shape in slide.shapes:
-            if hasattr(shape, "text_frame"):
-                if args["text"] in shape.text:
-                    for paragraph in shape.text_frame.paragraphs:
-                        for run in paragraph.runs:
-                            if args.get("bold"):
-                                run.font.bold = True
-                            if args.get("italic"):
-                                run.font.italic = True
-                            if fs := args.get("font_size"):
-                                run.font.size = PptxPt(fs)
-                            if fc := args.get("font_color"):
-                                rgb = hex_to_rgb(fc)
-                                run.font.color.rgb = PptxRGBColor(*rgb)
+        if self._is_url(source):
+            return self._convert_web_url(source, output_path)
 
-        prs.save(args["path"])
-        return self.success_result("Text formatted")
+        source_path = Path(source)
+        if not source_path.exists():
+            raise FileNotFoundError(f"Source not found: {source_path}")
 
-    def _set_theme(self, args: dict) -> list[TextContent]:
-        from mcp_office.base import hex_to_rgb
+        suffix = source_path.suffix.lower()
 
-        prs = Presentation(args["path"])
+        if suffix == ".pdf":
+            return self._convert_pdf(source_path, output_path)
+        if suffix in (".pptx", ".pptm", ".ppsx", ".ppsm", ".potx", ".potm"):
+            return self._convert_ppt(source_path, output_path)
+        if suffix in (".xlsx", ".xlsm"):
+            return self._convert_excel(source_path, output_path)
+        if suffix in (".md", ".markdown"):
+            content = source_path.read_text(encoding="utf-8")
+            if output_path:
+                Path(output_path).write_text(content, encoding="utf-8")
+            return self.success_result(
+                f"Read Markdown from {source_path} ({len(content)} chars)"
+                + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
+            )
+        # doc_to_md handles: docx, html, epub, ipynb + pandoc fallbacks
+        return self._convert_doc(source_path, output_path)
 
-        primary = args.get("primary_color", "#FF0000")
-        primary_rgb = hex_to_rgb(primary)
+    def _convert_pdf(self, source: Path, output: str | None) -> list[TextContent]:
+        from pdf_to_md import extract_pdf_to_markdown
 
-        for slide in prs.slides:
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.color.rgb = PptxRGBColor(*primary_rgb)
-
-        prs.save(args["path"])
-        return self.success_result("Theme colors applied")
-
-    def _add_chart(self, args: dict) -> list[TextContent]:
-
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
-
-        chart_type_map = {
-            "column": XL_CHART_TYPE.COLUMN_CLUSTERED,
-            "bar": XL_CHART_TYPE.BAR_CLUSTERED,
-            "line": XL_CHART_TYPE.LINE,
-            "pie": XL_CHART_TYPE.PIE,
-            "area": XL_CHART_TYPE.AREA,
-            "scatter": XL_CHART_TYPE.XY_SCATTER,
-        }
-
-        chart_type = chart_type_map.get(
-            args.get("chart_type", "column"), XL_CHART_TYPE.COLUMN_CLUSTERED
-        )
-
-        chart_data = CategoryChartData()
-        chart_data.categories = args.get("categories", [])
-        chart_data.add_series("Series", args.get("values", []))
-
-        left = PptxInches(args.get("left", 2))
-        top = PptxInches(args.get("top", 2))
-        width = PptxInches(args.get("width", 6))
-        height = PptxInches(args.get("height", 4.5))
-
-        chart = slide.shapes.add_chart(
-            chart_type, left, top, width, height, chart_data
-        ).chart
-
-        if title := args.get("title"):
-            chart.chart_title.has_text_frame = True
-            chart.chart_title.text_frame.text = title
-
-        prs.save(args["path"])
-        return self.success_result(f"Chart added: {args.get('chart_type')}")
-
-    def _add_bullet_slide(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        bullet_layout = prs.slide_layouts[1]
-        slide = prs.slides.add_slide(bullet_layout)
-
-        slide.shapes.title.text = args["title"]
-
-        body = slide.placeholders[1]
-        tf = body.text_frame
-        tf.text = args["bullets"][0]
-
-        for bullet in args["bullets"][1:]:
-            p = tf.add_paragraph()
-            p.text = bullet
-
-        prs.save(args["path"])
+        out_path = str(output) if output else None
+        content = extract_pdf_to_markdown(str(source), output_path=out_path)
+        if not content:
+            return self.error_result(f"Failed to convert PDF: {source}")
         return self.success_result(
-            f"Bullet slide added with {len(args['bullets'])} points"
+            f"Converted {source.name} to Markdown ({len(content)} chars)"
+            + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
         )
 
-    def _set_slide_layout(self, args: dict) -> list[TextContent]:
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
+    def _convert_ppt(self, source: Path, output: str | None) -> list[TextContent]:
+        from ppt_to_md import convert_presentation_to_markdown
 
-        layout_map = {
-            "title": 0,
-            "title_content": 1,
-            "bullet": 1,
-            "blank": 6,
-            "title_only": 5,
-        }
+        out_path = str(output) if output else None
+        content = convert_presentation_to_markdown(str(source), output_path=out_path)
+        if not content:
+            return self.error_result(f"Failed to convert PPT: {source}")
+        return self.success_result(
+            f"Converted {source.name} to Markdown ({len(content)} chars)"
+            + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
+        )
 
-        layout_idx = layout_map.get(args.get("layout", "blank"), 6)
-        slide.layout = prs.slide_layouts[layout_idx]
+    def _convert_excel(self, source: Path, output: str | None) -> list[TextContent]:
+        from excel_to_md import convert_to_markdown
 
-        prs.save(args["path"])
-        return self.success_result("Slide layout updated")
+        out_path = str(output) if output else None
+        content = convert_to_markdown(str(source), output_path=out_path)
+        if not content:
+            return self.error_result(f"Failed to convert Excel: {source}")
+        return self.success_result(
+            f"Converted {source.name} to Markdown ({len(content)} chars)"
+            + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
+        )
 
-    def _add_textbox(self, args: dict) -> list[TextContent]:
-        from mcp_office.base import hex_to_rgb
+    def _convert_doc(self, source: Path, output: str | None) -> list[TextContent]:
+        from doc_to_md import convert_to_markdown
 
-        prs = Presentation(args["path"])
-        slide = prs.slides[args["slide_index"]]
+        out_path = str(output) if output else None
+        content = convert_to_markdown(str(source), output_path=out_path)
+        if not content:
+            return self.error_result(f"Failed to convert document: {source}")
+        return self.success_result(
+            f"Converted {source.name} to Markdown ({len(content)} chars)"
+            + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
+        )
 
-        left = PptxInches(args.get("left", 1))
-        top = PptxInches(args.get("top", 1))
-        width = PptxInches(args.get("width", 6))
-        height = PptxInches(args.get("height", 1))
+    def _convert_web_url(self, url: str, output: str | None) -> list[TextContent]:
+        from web_to_md import process_url
 
-        txBox = slide.shapes.add_textbox(left, top, width, height)
-        tf = txBox.text_frame
-        tf.text = args["text"]
+        if output:
+            ok, result_url, err = process_url(url, output_file=output)
+        else:
+            tmp = Path(tempfile.mktemp(suffix=".md"))
+            ok, result_url, err = process_url(url, output_file=str(tmp))
+            if ok:
+                content = tmp.read_text(encoding="utf-8")
+                tmp.unlink()
+                return self.success_result(
+                    f"Fetched {url} as Markdown ({len(content)} chars)"
+                    + (f"\n\n{content[:5000]}" if len(content) > 5000 else f"\n\n{content}")
+                )
 
-        if args.get("bold"):
-            for p in tf.paragraphs:
-                for r in p.runs:
-                    r.font.bold = True
-
-        if fs := args.get("font_size"):
-            for p in tf.paragraphs:
-                for r in p.runs:
-                    r.font.size = PptxPt(fs)
-
-        if color := args.get("color"):
-            rgb = hex_to_rgb(color)
-            for p in tf.paragraphs:
-                for r in p.runs:
-                    r.font.color.rgb = PptxRGBColor(*rgb)
-
-        prs.save(args["path"])
-        return self.success_result("Textbox added")
-
-    def _extract_text(self, args: dict) -> list[TextContent]:
-        import json
-
-        prs = Presentation(args["path"])
-        all_text = []
-
-        for i, slide in enumerate(prs.slides):
-            slide_text = {"slide": i, "text": []}
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
-                        if para.text.strip():
-                            slide_text["text"].append(para.text)
-            all_text.append(slide_text)
-
-        return [TextContent(type="text", text=json.dumps(all_text, indent=2))]
+        if not ok:
+            return self.error_result(f"Failed to fetch URL: {err}")
+        return self.success_result(f"Fetched and saved from URL: {url}")

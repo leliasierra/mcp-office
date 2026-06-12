@@ -3,10 +3,11 @@ import shutil
 from pathlib import Path
 
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from mcp_office.handlers.base import DocumentHandler
+from mcp_office.spec import SpecManager
 from mcp.types import Tool, TextContent
 
 
@@ -284,10 +285,14 @@ class WordHandler(DocumentHandler):
 
     def _create_document(self, args: dict) -> list[TextContent]:
         doc = Document()
+        spec = SpecManager("word", args["path"])
         if title := args.get("title"):
             doc.core_properties.title = title
+            spec.set_property("title", title)
         if author := args.get("author"):
             doc.core_properties.author = author
+            spec.set_property("author", author)
+        spec.append({"type": "create", "title": title, "author": author})
         doc.save(args["path"])
         return self.success_result(f"Document created: {args['path']}")
 
@@ -327,6 +332,10 @@ class WordHandler(DocumentHandler):
 
     def _copy_document(self, args: dict) -> list[TextContent]:
         shutil.copy2(args["source"], args["destination"])
+        src_spec = SpecManager.spec_path_for(args["source"])
+        if Path(src_spec).exists():
+            dst_spec = SpecManager.spec_path_for(args["destination"])
+            shutil.copy2(src_spec, dst_spec)
         return self.success_result(f"Document copied to: {args['destination']}")
 
     def _merge_documents(self, args: dict) -> list[TextContent]:
@@ -344,6 +353,12 @@ class WordHandler(DocumentHandler):
         if args.get("bold"):
             heading.runs[0].bold = True
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "heading",
+            "text": args["text"],
+            "level": args.get("level", 1),
+            "bold": args.get("bold", False),
+        })
         return self.success_result(f"Heading added: {args['text']}")
 
     def _add_paragraph(self, args: dict) -> list[TextContent]:
@@ -360,6 +375,12 @@ class WordHandler(DocumentHandler):
             }
             paragraph.alignment = align_map.get(alignment, WD_ALIGN_PARAGRAPH.LEFT)
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "paragraph",
+            "text": args["text"],
+            "bold": args.get("bold", False),
+            "alignment": args.get("alignment"),
+        })
         return self.success_result(f"Paragraph added: {args['text']}")
 
     def _add_table(self, args: dict) -> list[TextContent]:
@@ -374,19 +395,30 @@ class WordHandler(DocumentHandler):
                 for run in cell.paragraphs[0].runs:
                     run.bold = True
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "table",
+            "data": data,
+            "header_row": args.get("header_row", False),
+        })
         return self.success_result(f"Table added with {len(data)} rows")
 
     def _add_image(self, args: dict) -> list[TextContent]:
         doc = Document(args["path"])
-        width = Inches(args.get("width_cm", 5)) if args.get("width_cm") else None
+        width = Cm(args.get("width_cm", 7))
         doc.add_picture(args["image_path"], width=width)
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "image",
+            "image_path": args["image_path"],
+            "width_cm": args.get("width_cm", 7),
+        })
         return self.success_result(f"Image added: {args['image_path']}")
 
     def _add_page_break(self, args: dict) -> list[TextContent]:
         doc = Document(args["path"])
         doc.add_page_break()
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({"type": "page_break"})
         return self.success_result("Page break added")
 
     def _add_bullet_list(self, args: dict) -> list[TextContent]:
@@ -398,6 +430,11 @@ class WordHandler(DocumentHandler):
             for item in args["items"]:
                 doc.add_paragraph(item, style="List Bullet")
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "list",
+            "items": args["items"],
+            "numbered": args.get("numbered", False),
+        })
         return self.success_result(f"List added with {len(args['items'])} items")
 
     def _find_replace(self, args: dict) -> list[TextContent]:
@@ -408,6 +445,12 @@ class WordHandler(DocumentHandler):
                 para.text = para.text.replace(args["find"], args["replace"])
                 count += 1
         doc.save(args["path"])
+        SpecManager("word", args["path"]).append({
+            "type": "find_replace",
+            "find": args["find"],
+            "replace": args["replace"],
+            "count": count,
+        })
         return self.success_result(f"Replaced {count} occurrences")
 
     def _format_text_range(self, args: dict) -> list[TextContent]:
@@ -459,7 +502,7 @@ class WordHandler(DocumentHandler):
                     for j, cell in enumerate(row):
                         table.rows[i].cells[j].text = cell
             elif item["type"] == "image":
-                width = Inches(item.get("width", 5))
+                width = Cm(item.get("width_cm") or item.get("width", 7))
                 doc.add_picture(item["path"], width=width)
             elif item["type"] == "page_break":
                 doc.add_page_break()
@@ -473,11 +516,15 @@ class WordHandler(DocumentHandler):
         )
         doc.save(output_path)
 
+        spec["path"] = output_path
+        with open(SpecManager.spec_path_for(output_path), "w") as f:
+            json.dump(spec, f, indent=2, ensure_ascii=False)
+
         return self.success_result(f"Document created from spec: {output_path}")
 
     def _save_document_spec(self, args: dict) -> list[TextContent]:
         doc = Document(args["path"])
-        spec = {"content": []}
+        spec = {"type": "word", "path": args["path"], "properties": {}, "content": [], "post_processing": []}
 
         for para in doc.paragraphs:
             if para.style.name.startswith("Heading"):
@@ -496,7 +543,7 @@ class WordHandler(DocumentHandler):
             spec["content"].append({"type": "table", "data": data})
 
         output_path = args.get(
-            "output_path", args["path"].replace(".docx", "_spec.json")
+            "output_path", SpecManager.spec_path_for(args["path"])
         )
         with open(output_path, "w") as f:
             json.dump(spec, f, indent=2)

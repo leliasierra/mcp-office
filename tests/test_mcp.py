@@ -27,14 +27,6 @@ def temp_xlsx(tmp_path):
 
 
 @pytest.fixture
-def temp_pptx(tmp_path):
-    pptx_path = tmp_path / "test.pptx"
-    prs = Presentation()
-    prs.save(str(pptx_path))
-    return str(pptx_path)
-
-
-@pytest.fixture
 def temp_pdf(tmp_path):
     pdf_path = tmp_path / "test.pdf"
     return str(pdf_path)
@@ -49,7 +41,7 @@ async def test_list_tools():
     assert "open_document" in tool_names
     assert "pdf_read" in tool_names
     assert "excel_create" in tool_names
-    assert "ppt_create" in tool_names
+    assert "ppt_generate" in tool_names
 
 
 @pytest.mark.asyncio
@@ -249,53 +241,44 @@ async def test_excel_list_sheets(temp_xlsx):
     assert len(sheets) >= 1
 
 
-@pytest.mark.asyncio
-async def test_ppt_create(tmp_path):
-    path = str(tmp_path / "new_presentation.pptx")
-    result = await call_tool("ppt_create", {"path": path, "title": "My Presentation"})
-    assert "created" in result[0].text.lower()
-    assert Path(path).exists()
-
-
-@pytest.mark.asyncio
-async def test_ppt_add_slide(temp_pptx):
-    result = await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "title"})
-    assert "added" in result[0].text.lower()
-
-
-@pytest.mark.asyncio
-async def test_ppt_add_title(temp_pptx):
-    await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "title_content"})
-    result = await call_tool(
-        "ppt_add_title",
-        {"path": temp_pptx, "slide_index": 0, "title": "Slide Title", "font_size": 32},
+@pytest.fixture
+def temp_svg_dir(tmp_path):
+    svg_dir = tmp_path / "slides"
+    svg_dir.mkdir()
+    svg_1 = svg_dir / "01_cover.svg"
+    svg_1.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">'
+        '<rect width="1280" height="720" fill="#1a1a2e"/>'
+        '<text x="640" y="360" text-anchor="middle" font-size="48" fill="white">'
+        "Test Title</text></svg>"
     )
-    assert "title" in result[0].text.lower()
-
-
-@pytest.mark.asyncio
-async def test_ppt_add_text(temp_pptx):
-    await call_tool("ppt_add_slide", {"path": temp_pptx, "layout": "blank"})
-    result = await call_tool(
-        "ppt_add_text",
-        {
-            "path": temp_pptx,
-            "slide_index": 0,
-            "text": "Sample text",
-            "left": 1,
-            "top": 2,
-            "width": 5,
-            "height": 1,
-        },
+    svg_2 = svg_dir / "02_content.svg"
+    svg_2.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">'
+        '<rect width="1280" height="720" fill="#ffffff"/>'
+        '<text x="640" y="360" text-anchor="middle" font-size="36" fill="#333">'
+        "Test Content</text></svg>"
     )
-    assert "text" in result[0].text.lower()
+    return str(svg_dir)
 
 
 @pytest.mark.asyncio
-async def test_ppt_list_slides(temp_pptx):
-    result = await call_tool("ppt_list_slides", {"path": temp_pptx})
-    slides = json.loads(result[0].text)
-    assert isinstance(slides, list)
+async def test_ppt_generate(temp_svg_dir, tmp_path):
+    output = str(tmp_path / "presentation.pptx")
+    result = await call_tool(
+        "ppt_generate", {"svg_source": temp_svg_dir, "output": output}
+    )
+    assert "generated" in result[0].text.lower()
+    assert Path(output).exists()
+
+
+@pytest.mark.asyncio
+async def test_ppt_generate_invalid_source(tmp_path):
+    result = await call_tool(
+        "ppt_generate",
+        {"svg_source": str(tmp_path / "nonexistent"), "output": str(tmp_path / "out.pptx")},
+    )
+    assert "error" in result[0].text.lower()
 
 
 @pytest.mark.asyncio
@@ -430,3 +413,184 @@ async def test_save_document_spec(temp_doc, tmp_path):
     )
     assert "saved" in result[0].text.lower()
     assert output_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_auto_spec_word_full_flow(tmp_path):
+    doc_path = str(tmp_path / "full_test.docx")
+    spec_path = doc_path + ".spec.json"
+
+    # --- Create document with properties ---
+    result = await call_tool("create_document", {"path": doc_path, "title": "Full Test", "author": "Tester"})
+    assert "created" in result[0].text.lower()
+    assert Path(doc_path).exists()
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["type"] == "word"
+    assert spec["path"] == doc_path
+    assert spec["properties"]["title"] == "Full Test"
+    assert spec["properties"]["author"] == "Tester"
+    assert spec["content"][0]["type"] == "create"
+    assert len(spec["content"]) == 1
+
+    # --- Add heading ---
+    await call_tool("add_heading", {"path": doc_path, "text": "Introduction", "level": 1, "bold": True})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1] == {"type": "heading", "text": "Introduction", "level": 1, "bold": True}
+    assert len(spec["content"]) == 2
+
+    # --- Add paragraph with alignment and bold ---
+    await call_tool("add_paragraph", {"path": doc_path, "text": "This is a bold center paragraph.", "bold": True, "alignment": "center"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1] == {"type": "paragraph", "text": "This is a bold center paragraph.", "bold": True, "alignment": "center"}
+    assert len(spec["content"]) == 3
+
+    # --- Add another paragraph (plain) ---
+    await call_tool("add_paragraph", {"path": doc_path, "text": "Plain left text."})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1] == {"type": "paragraph", "text": "Plain left text.", "bold": False, "alignment": None}
+    assert len(spec["content"]) == 4
+
+    # --- Add table ---
+    data = [["Name", "Age"], ["Alice", "30"], ["Bob", "25"]]
+    await call_tool("add_table", {"path": doc_path, "data": data, "header_row": True})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "table"
+    assert spec["content"][-1]["data"] == data
+    assert spec["content"][-1]["header_row"] is True
+    assert len(spec["content"]) == 5
+
+    # --- Add bullet list ---
+    await call_tool("add_bullet_list", {"path": doc_path, "items": ["First", "Second", "Third"], "numbered": False})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "list"
+    assert spec["content"][-1]["items"] == ["First", "Second", "Third"]
+    assert spec["content"][-1]["numbered"] is False
+    assert len(spec["content"]) == 6
+
+    # --- Add numbered list ---
+    await call_tool("add_bullet_list", {"path": doc_path, "items": ["Step 1", "Step 2"], "numbered": True})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["numbered"] is True
+    assert len(spec["content"]) == 7
+
+    # --- Add page break ---
+    await call_tool("add_page_break", {"path": doc_path})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1] == {"type": "page_break"}
+    assert len(spec["content"]) == 8
+
+    # --- Find and replace ---
+    await call_tool("find_replace", {"path": doc_path, "find": "Alice", "replace": "Charlie"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "find_replace"
+    assert spec["content"][-1]["find"] == "Alice"
+    assert spec["content"][-1]["replace"] == "Charlie"
+    assert len(spec["content"]) == 9
+
+    # --- Copy document and verify spec is copied too ---
+    copy_path = str(tmp_path / "copy_test.docx")
+    await call_tool("copy_document", {"source": doc_path, "destination": copy_path})
+    assert Path(copy_path).exists()
+    assert Path(copy_path + ".spec.json").exists()
+    copy_spec = json.loads(Path(copy_path + ".spec.json").read_text())
+    assert copy_spec["content"] == spec["content"]
+
+    # --- Verify content ordering ---
+    assert [c["type"] for c in spec["content"]] == [
+        "create", "heading", "paragraph", "paragraph",
+        "table", "list", "list", "page_break", "find_replace"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_spec_excel_full_flow(tmp_path):
+    xlsx_path = str(tmp_path / "full_test.xlsx")
+    spec_path = xlsx_path + ".spec.json"
+
+    # --- Create workbook ---
+    await call_tool("excel_create", {"path": xlsx_path, "sheet_name": "Data"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["type"] == "excel"
+    assert spec["properties"]["sheet_name"] == "Data"
+    assert spec["content"][0]["type"] == "create"
+
+    # --- Write cell ---
+    await call_tool("excel_write_cell", {"path": xlsx_path, "sheet": "Data", "cell": "A1", "value": "Hello"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1] == {"type": "write_cell", "sheet": "Data", "cell": "A1", "value": "Hello"}
+
+    # --- Add row ---
+    await call_tool("excel_add_row", {"path": xlsx_path, "sheet": "Data", "data": ["Alice", "30"]})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "add_row"
+    assert spec["content"][-1]["data"] == ["Alice", "30"]
+
+    # --- Add formula ---
+    await call_tool("excel_add_formula", {"path": xlsx_path, "sheet": "Data", "cell": "C1", "formula": "=SUM(A1:B1)"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "add_formula"
+    assert spec["content"][-1]["formula"] == "=SUM(A1:B1)"
+
+    # --- Format cell ---
+    await call_tool("excel_format_cell", {"path": xlsx_path, "sheet": "Data", "cell": "A1", "bold": True, "font_size": 14, "font_color": "#FF0000"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "format_cell"
+    assert spec["content"][-1]["bold"] is True
+
+    # --- Add table ---
+    await call_tool("excel_add_table", {"path": xlsx_path, "sheet": "Data", "data": [["X", "Y"], ["1", "2"]], "start_cell": "E1"})
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["content"][-1]["type"] == "add_table"
+
+    # --- Record conversion intent ---
+    await call_tool("excel_to_pdf", {"input_path": xlsx_path, "output_path": str(tmp_path / "test.pdf")})
+    spec = json.loads(Path(spec_path).read_text())
+    assert len(spec["post_processing"]) == 1
+    assert spec["post_processing"][0]["action"] == "convert_to_pdf"
+
+    # --- Verify all content types ---
+    types = [c["type"] for c in spec["content"]]
+    assert types == ["create", "write_cell", "add_row", "add_formula", "format_cell", "add_table"]
+
+
+@pytest.mark.asyncio
+async def test_ppt_generate_auto_spec(temp_svg_dir, tmp_path):
+    pptx_path = str(tmp_path / "full_test.pptx")
+    spec_path = pptx_path + ".spec.json"
+
+    result = await call_tool(
+        "ppt_generate", {"svg_source": temp_svg_dir, "output": pptx_path}
+    )
+    assert "generated" in result[0].text.lower()
+    assert Path(pptx_path).exists()
+
+    spec = json.loads(Path(spec_path).read_text())
+    assert spec["type"] == "powerpoint"
+    assert spec["content"][0]["type"] == "generate"
+    assert spec["content"][0]["slides"] == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_spec_create_from_spec(tmp_path):
+    spec_path = str(tmp_path / "my_spec.json")
+    spec_data = {
+        "type": "word",
+        "path": "",
+        "properties": {"title": "Generated"},
+        "content": [
+            {"type": "heading", "text": "Title", "level": 1, "bold": True},
+            {"type": "paragraph", "text": "Content", "bold": False, "alignment": None},
+        ],
+        "post_processing": [],
+    }
+    with open(spec_path, "w") as f:
+        json.dump(spec_data, f)
+
+    output_path = str(tmp_path / "from_spec.docx")
+    await call_tool("create_from_spec", {"spec_path": spec_path, "output_path": output_path})
+    assert Path(output_path).exists()
+    auto_spec = json.loads(Path(output_path + ".spec.json").read_text())
+    assert auto_spec["type"] == "word"
+    assert auto_spec["path"] == output_path
+    assert len(auto_spec["content"]) == 2
+    assert auto_spec["content"][0]["type"] == "heading"

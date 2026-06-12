@@ -38,13 +38,12 @@ MCP server for Office document manipulation (Word, Excel, PowerPoint, PDF).
 - Set column widths
 - List sheets
 
-### PowerPoint Operations
-- Create presentations
-- Add slides with layouts
-- Add titles and text
-- Add images
-- Add tables
-- List slides
+### PowerPoint Operations (ppt-master Engine)
+- Generate native editable PPTX from SVG files with full DrawingML shapes
+- Support 8 canvas formats: 16:9, 4:3, A4, social media, banners
+- Slide transitions, entrance animations, auto-advance (kiosk mode)
+- Automatic SVG post-processing (icon embedding, image alignment, text flattening)
+- Source document conversion to Markdown (PDF, DOCX, PPTX, XLSX, URL, and more)
 
 ### PDF Operations
 - Read and extract content from PDF
@@ -62,10 +61,48 @@ MCP server for Office document manipulation (Word, Excel, PowerPoint, PDF).
 - Convert Excel to PDF (requires LibreOffice)
 - Convert PowerPoint to PDF (requires LibreOffice)
 
+### Source Document Conversion
+- `ppt_convert_source` converts PDF, DOCX, PPTX, XLSX, HTML, EPUB, URLs, and more to Markdown
+- Powered by ppt-master's source_to_md converters with Pandoc fallback for legacy formats
+
 ## Installation
 
 ```bash
 uv sync
+```
+
+### Dependencies
+
+- `python-docx` - Word document creation and manipulation
+- `pypdf` - PDF reading and manipulation
+- `pymupdf` - Advanced PDF operations
+- `docx2pdf` - Word to PDF conversion
+- `mcp` - MCP protocol SDK
+- `python-pptx` - PowerPoint presentation creation
+- `openpyxl` - Excel workbook reading/writing
+- `xlsxwriter` - Excel workbook creation with advanced formatting
+- `pandas` - Data analysis and Excel integration
+- `reportlab` - PDF creation and text/watermark operations
+- `img2pdf` - Image to PDF conversion
+- `pytesseract` - OCR text extraction from images
+- `Pillow` - Image processing (ppt-master SVG finalization)
+- `svglib` - SVG parsing utilities (ppt-master SVG finalization)
+
+### ppt-master Dependencies (optionally installed)
+
+The ppt-master source converters require additional packages per converter:
+
+- `PyMuPDF` — PDF to Markdown
+- `mammoth`, `beautifulsoup4`, `markdownify`, `ebooklib`, `nbconvert` — Document to Markdown
+- `python-pptx` — PowerPoint to Markdown
+- `openpyxl`, `pandas` — Excel to Markdown
+- `requests`, `beautifulsoup4` — Web to Markdown
+- `curl_cffi` — TLS fingerprint bypass for WeChat/some Chinese sites
+- `pandoc` (system executable) — Legacy format fallback (.doc, .odt, .rtf, .tex, etc.)
+
+Install them as needed:
+```bash
+pip install PyMuPDF mammoth beautifulsoup4 markdownify ebooklib nbconvert requests curl_cffi
 ```
 
 ## OpenCode Configuration
@@ -109,8 +146,11 @@ opencode run "Extract all text from C:/documents/report.pdf. use office"
 # Create Excel spreadsheet
 opencode run "Create an Excel workbook at C:/data/sales.xlsx with sheet 'Sales' and add headers ['Product', 'Qty', 'Price']. use office"
 
-# Add slides to PowerPoint
-opencode run "Create a PowerPoint at C:/presentations/demo.pptx with title 'My Presentation' and add a title+content slide. use office"
+# Generate PowerPoint from SVGs
+opencode run "Generate a PPTX from SVGs in ./slides at ./output.pptx with format ppt169 and fade transitions. use office"
+
+# Convert source document to Markdown
+opencode run "Convert report.pdf to Markdown. use office"
 ```
 
 ## GitHub Copilot CLI Configuration
@@ -165,13 +205,8 @@ gh copilot run --experimental-mcp "office" "Create a Word document..."
 | `excel_set_column_width` | Set column width |
 | `excel_merge_cells` | Merge cells |
 | `excel_list_sheets` | List sheets |
-| `ppt_create` | Create a presentation |
-| `ppt_add_slide` | Add a slide |
-| `ppt_add_title` | Add title to slide |
-| `ppt_add_text` | Add text to slide |
-| `ppt_add_image` | Add image to slide |
-| `ppt_add_table` | Add table to slide |
-| `ppt_list_slides` | List slides |
+| `ppt_generate` | Generate PPTX from SVG files (ppt-master engine) |
+| `ppt_convert_source` | Convert source document (PDF/DOCX/PPTX/URL) to Markdown |
 | `pdf_read` | Read and extract PDF content |
 | `pdf_get_info` | Get PDF metadata |
 | `pdf_split` | Split PDF into pages |

@@ -5,6 +5,7 @@ import pandas as pd
 
 from mcp_office.base import hex_to_rgb, rgb_to_hex
 from mcp_office.handlers.base import DocumentHandler
+from mcp_office.spec import SpecManager
 from mcp.types import Tool, TextContent
 
 
@@ -301,9 +302,12 @@ class ExcelHandler(DocumentHandler):
 
     def _create(self, args: dict) -> list[TextContent]:
         wb = Workbook()
-        if name := args.get("sheet_name"):
-            wb.active.title = name
+        sheet_name = args.get("sheet_name", "Sheet")
+        wb.active.title = sheet_name
         wb.save(args["path"])
+        spec = SpecManager("excel", args["path"])
+        spec.set_property("sheet_name", sheet_name)
+        spec.append({"type": "create", "sheet_name": sheet_name})
         return self.success_result(f"Workbook created: {args['path']}")
 
     def _read(self, args: dict) -> list[TextContent]:
@@ -321,6 +325,12 @@ class ExcelHandler(DocumentHandler):
         ws = self._get_sheet(wb, args["sheet"])
         ws[args["cell"]] = args["value"]
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "write_cell",
+            "sheet": args["sheet"],
+            "cell": args["cell"],
+            "value": args["value"],
+        })
         return self.success_result(f"Wrote {args['value']} to {args['cell']}")
 
     def _add_row(self, args: dict) -> list[TextContent]:
@@ -328,6 +338,11 @@ class ExcelHandler(DocumentHandler):
         ws = self._get_sheet(wb, args["sheet"])
         ws.append(args["data"])
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "add_row",
+            "sheet": args["sheet"],
+            "data": args["data"],
+        })
         return self.success_result(f"Added row with {len(args['data'])} cells")
 
     def _add_formula(self, args: dict) -> list[TextContent]:
@@ -335,6 +350,12 @@ class ExcelHandler(DocumentHandler):
         ws = self._get_sheet(wb, args["sheet"])
         ws[args["cell"]] = args["formula"]
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "add_formula",
+            "sheet": args["sheet"],
+            "cell": args["cell"],
+            "formula": args["formula"],
+        })
         return self.success_result(f"Added formula {args['formula']}")
 
     def _format_cell(self, args: dict) -> list[TextContent]:
@@ -354,6 +375,15 @@ class ExcelHandler(DocumentHandler):
             cell.fill = PatternFill(start_color=rgb_to_hex(rgb), fill_type="solid")
 
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "format_cell",
+            "sheet": args["sheet"],
+            "cell": args["cell"],
+            "bold": args.get("bold"),
+            "font_size": args.get("font_size"),
+            "font_color": args.get("font_color"),
+            "bg_color": args.get("bg_color"),
+        })
         return self.success_result(f"Formatted cell {args['cell']}")
 
     def _add_table(self, args: dict) -> list[TextContent]:
@@ -368,6 +398,12 @@ class ExcelHandler(DocumentHandler):
                 cell.value = val
 
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "add_table",
+            "sheet": args["sheet"],
+            "data": data,
+            "start_cell": args["start_cell"],
+        })
         return self.success_result(f"Added table with {len(data)} rows")
 
     def _set_column_width(self, args: dict) -> list[TextContent]:
@@ -375,6 +411,12 @@ class ExcelHandler(DocumentHandler):
         ws = self._get_sheet(wb, args["sheet"])
         ws.column_dimensions[args["column"]].width = args["width"]
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "set_column_width",
+            "sheet": args["sheet"],
+            "column": args["column"],
+            "width": args["width"],
+        })
         return self.success_result(f"Set column {args['column']} width")
 
     def _merge_cells(self, args: dict) -> list[TextContent]:
@@ -382,6 +424,12 @@ class ExcelHandler(DocumentHandler):
         ws = self._get_sheet(wb, args["sheet"])
         ws.merge_cells(f"{args['start_cell']}:{args['end_cell']}")
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "merge_cells",
+            "sheet": args["sheet"],
+            "start_cell": args["start_cell"],
+            "end_cell": args["end_cell"],
+        })
         return self.success_result(f"Merged {args['start_cell']}:{args['end_cell']}")
 
     def _list_sheets(self, args: dict) -> list[TextContent]:
@@ -391,6 +439,9 @@ class ExcelHandler(DocumentHandler):
         return [TextContent(type="text", text=json.dumps(wb.sheetnames, indent=2))]
 
     def _excel_to_pdf(self, args: dict) -> list[TextContent]:
+        SpecManager("excel", args["input_path"]).add_post_processing(
+            "convert_to_pdf", output=args.get("output_path")
+        )
         return self.success_result(
             "Excel to PDF requires LibreOffice. Install and use: soffice --headless --convert-to pdf input.xlsx"
         )
@@ -399,6 +450,9 @@ class ExcelHandler(DocumentHandler):
         workbook = xlsxwriter.Workbook(args["path"])
         workbook.add_worksheet(args.get("sheet_name", "Sheet"))
         workbook.close()
+        spec = SpecManager("excel", args["path"])
+        spec.set_property("sheet_name", args.get("sheet_name", "Sheet"))
+        spec.append({"type": "create_xlsxwriter", "sheet_name": args.get("sheet_name", "Sheet")})
         return self.success_result(f"Workbook created: {args['path']}")
 
     def _add_chart(self, args: dict) -> list[TextContent]:
@@ -426,6 +480,13 @@ class ExcelHandler(DocumentHandler):
 
         ws.insert_chart("E2", chart)
         workbook.close()
+        SpecManager("excel", args["path"]).append({
+            "type": "add_chart",
+            "sheet": args.get("sheet", "Sheet"),
+            "chart_type": args.get("chart_type"),
+            "data_range": args.get("data_range"),
+            "title": args.get("title"),
+        })
         return self.success_result(f"Chart added: {args.get('chart_type')}")
 
     def _conditional_format(self, args: dict) -> list[TextContent]:
@@ -447,6 +508,12 @@ class ExcelHandler(DocumentHandler):
         )
 
         wb.save(args["path"])
+        SpecManager("excel", args["path"]).append({
+            "type": "conditional_format",
+            "sheet": args["sheet"],
+            "range": args["range"],
+            "condition": args.get("condition"),
+        })
         return self.success_result("Conditional formatting added")
 
     def _pandas_read(self, args: dict) -> list[TextContent]:
@@ -463,4 +530,7 @@ class ExcelHandler(DocumentHandler):
         df.to_excel(
             args["path"], sheet_name=args.get("sheet_name", "Sheet"), index=False
         )
+        spec = SpecManager("excel", args["path"])
+        spec.set_property("sheet_name", args.get("sheet_name", "Sheet"))
+        spec.append({"type": "pandas_to_excel", "data_preview": str(data[:3]) if data else "[]"})
         return self.success_result(f"Created Excel from data: {args['path']}")

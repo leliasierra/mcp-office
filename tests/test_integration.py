@@ -93,20 +93,24 @@ class TestIntegration:
         assert len(data) > 0
 
     @pytest.mark.asyncio
-    async def test_ppt_slide_management(self, tmp_path):
-        """Test PPT slide creation and listing"""
+    async def test_ppt_generate(self, tmp_path):
+        """Test PPT generation from SVGs"""
         ppt = PptHandler()
-        pptx_path = tmp_path / "presentation.pptx"
-
-        await ppt.execute("ppt_create", {"path": str(pptx_path), "title": "Test"})
-        await ppt.execute(
-            "ppt_add_slide", {"path": str(pptx_path), "layout": "title_content"}
+        svg_dir = tmp_path / "slides"
+        svg_dir.mkdir()
+        svg = svg_dir / "slide.svg"
+        svg.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">'
+            '<rect width="1280" height="720" fill="#fff"/>'
+            '<text x="640" y="360" text-anchor="middle" font-size="36">Hello</text></svg>'
         )
-        await ppt.execute("ppt_add_slide", {"path": str(pptx_path), "layout": "blank"})
 
-        result = await ppt.execute("ppt_list_slides", {"path": str(pptx_path)})
-        slides = json.loads(result[0].text)
-        assert len(slides) == 3
+        output = tmp_path / "out.pptx"
+        result = await ppt.execute(
+            "ppt_generate", {"svg_source": str(svg_dir), "output": str(output)}
+        )
+        assert "generated" in result[0].text.lower()
+        assert output.exists()
 
     def test_handler_error_results(self):
         """All handlers return proper error format"""

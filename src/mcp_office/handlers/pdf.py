@@ -7,6 +7,7 @@ from reportlab.lib.pagesizes import letter, A4
 import img2pdf
 
 from mcp_office.handlers.base import DocumentHandler
+from mcp_office.spec import SpecManager
 from mcp.types import Tool, TextContent
 
 
@@ -439,6 +440,9 @@ class PdfHandler(DocumentHandler):
         from docx2pdf import convert
 
         convert(args["input_path"], args["output_path"])
+        SpecManager("word", args["input_path"]).add_post_processing(
+            "convert_to_pdf", output=args["output_path"]
+        )
         return self.success_result(f"Converted to {args['output_path']}")
 
     def _pdf_to_word(self, args: dict) -> list[TextContent]:
@@ -449,6 +453,9 @@ class PdfHandler(DocumentHandler):
                 doc.add_paragraph(text)
                 doc.add_page_break()
         doc.save(args["output_path"])
+        SpecManager("pdf", args["input_path"]).add_post_processing(
+            "convert_to_word", output=args["output_path"]
+        )
         return self.success_result(f"Converted to {args['output_path']}")
 
     def _pdf_create(self, args: dict) -> list[TextContent]:
