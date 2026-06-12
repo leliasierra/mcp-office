@@ -1,4 +1,5 @@
 import re
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -91,6 +92,7 @@ class PptHandler(DocumentHandler):
         return [
             self._ppt_generate_tool(),
             self._ppt_convert_source_tool(),
+            self._ppt_to_pdf_tool(),
         ]
 
     def _ppt_generate_tool(self) -> Tool:
@@ -199,12 +201,37 @@ class PptHandler(DocumentHandler):
             },
         )
 
+    def _ppt_to_pdf_tool(self) -> Tool:
+        return Tool(
+            name="ppt_to_pdf",
+            description=(
+                "Convert a PowerPoint file (PPTX) to PDF using LibreOffice. "
+                "LibreOffice must be installed and accessible via 'soffice'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "input_path": {
+                        "type": "string",
+                        "description": "Path to the PowerPoint file",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Output path for the PDF file",
+                    },
+                },
+                "required": ["input_path", "output_path"],
+            },
+        )
+
     async def execute(self, tool_name: str, arguments: dict) -> list[TextContent]:
         try:
             if tool_name == "ppt_generate":
                 return self._generate(arguments)
             if tool_name == "ppt_convert_source":
                 return self._convert_source(arguments)
+            if tool_name == "ppt_to_pdf":
+                return self._ppt_to_pdf(arguments)
             return self.error_result(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self.error_result(str(e))
@@ -454,3 +481,52 @@ class PptHandler(DocumentHandler):
         if not ok:
             return self.error_result(f"Failed to fetch URL: {err}")
         return self.success_result(f"Fetched and saved from URL: {url}")
+
+    def _ppt_to_pdf(self, args: dict) -> list[TextContent]:
+        input_path = Path(args["input_path"])
+        output_path = Path(args["output_path"])
+
+        if not input_path.exists():
+            return self.error_result(f"File not found: {input_path}")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            subprocess.run(
+                [
+                    "soffice",
+                    "--headless",
+                    "--convert-to", "pdf",
+                    "--outdir", str(output_path.parent),
+                    str(input_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            SpecManager("powerpoint", str(input_path)).add_post_processing(
+                "convert_to_pdf", output=str(output_path)
+            )
+            return self.success_result(
+                "PPT to PDF requires LibreOffice. Install and run: "
+                f"soffice --headless --convert-to pdf {input_path} -o {output_path}"
+            )
+        except subprocess.CalledProcessError as e:
+            return self.error_result(
+                f"LibreOffice conversion failed: {e.stderr or e.stdout or e}"
+            )
+
+        # LibreOffice auto-names the output; rename if different
+        expected = output_path.parent / f"{input_path.stem}.pdf"
+        if expected.resolve() != output_path.resolve() and expected.exists():
+            shutil.move(str(expected), str(output_path))
+
+        if not output_path.exists():
+            return self.error_result("PDF output not found after conversion")
+
+        SpecManager("powerpoint", str(input_path)).add_post_processing(
+            "convert_to_pdf", output=str(output_path)
+        )
+        return self.success_result(f"Converted to PDF: {output_path}")

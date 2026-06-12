@@ -187,6 +187,7 @@ class TestE2E:
         assert "word_to_pdf" in tool_names
         assert "pdf_to_word" in tool_names
         assert "excel_to_pdf" in tool_names
+        assert "ppt_to_pdf" in tool_names
 
     @pytest.mark.asyncio
     async def test_handler_dispatch_correctly(self):
